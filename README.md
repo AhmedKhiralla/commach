@@ -161,8 +161,8 @@ ComMach is a **separate service with its own database**, so it is validated, bac
    | optional `MAIL_FROM` / `MAIL_FROM_NAME` | default `comp11labs@gmail.com` / `ComMach by Comp11 Labs` |
    | optional `MAIL_BCC` | a copy of every e-mail, e.g. for the first weeks of a pilot |
    | optional `SCHEDULER_SECONDS` | how often escalations, digests and the e-mail outbox run (default 300; 0 = off) |
-   | optional `QWEN_VISION_MODEL` / `QWEN_TEXT_MODEL` | default `qwen-vl-plus` / `qwen-plus` |
-   | optional `QWEN_BASE_URL` | default `https://dashscope-intl.aliyuncs.com/compatible-mode/v1` |
+   | optional `QWEN_BASE_URL` | default `https://ap-southeast-1.maas.qwencloudapi.com/compatible-mode/v1` (QwenCloud, Singapore); for an Alibaba Cloud Model Studio key use `https://dashscope-intl.aliyuncs.com/compatible-mode/v1` |
+   | optional `QWEN_VISION_MODEL` / `QWEN_TEXT_MODEL` | default `qwen3-vl-plus` / `qwen-plus`. If the account has no model of that name, ComMach tries the known alternatives (`qwen3.8-flash`, `qwen-vl-max`, `qwen-vl-plus`, …), uses the first that works and logs it |
 
 5. **Add the domain.**
    - Under **Settings → Networking**, add the custom domain `commach.comp11labs.com`.
