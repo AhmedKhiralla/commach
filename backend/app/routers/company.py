@@ -40,10 +40,12 @@ class SitePatch(BaseModel):
     address: str | None = Field(default=None, max_length=400)
     active: bool | None = None
     group_id: str | None = None
+    head_user_id: str | None = None
 
 
 SITE_SQL = """
-SELECT s.id, s.code, s.name, s.country, s.timezone, s.address, s.active, s.updated_at, s.group_id,
+SELECT s.id, s.code, s.name, s.country, s.timezone, s.address, s.active, s.updated_at, s.group_id, s.head_user_id,
+       (SELECT u.full_name FROM users u WHERE u.id = s.head_user_id) AS head_name,
        (SELECT g.name FROM site_groups g WHERE g.id = s.group_id) AS group_name,
        (SELECT count(*) FROM assets a WHERE a.site_id = s.id) AS asset_count,
        (SELECT count(DISTINCT r.user_id) FROM user_site_roles r WHERE r.site_id = s.id) AS user_count
@@ -78,6 +80,10 @@ def update_site(call: Call):
         if b.group_id and not call.tx.val("SELECT 1 FROM site_groups WHERE id = %s::uuid", b.group_id):
             raise ApiError(422, "invalid", "Some fields need attention.", fields={"group_id": "Choose a group."})
         call.tx.x("UPDATE sites SET group_id = %s::uuid WHERE id = %s::uuid", b.group_id or None, sid)
+    if "head_user_id" in b.model_fields_set:
+        if b.head_user_id and not call.tx.val("SELECT 1 FROM users WHERE id = %s::uuid AND status = 'active'", b.head_user_id):
+            raise ApiError(422, "invalid", "Some fields need attention.", fields={"head_user_id": "Choose an active user."})
+        call.tx.x("UPDATE sites SET head_user_id = %s::uuid WHERE id = %s::uuid", b.head_user_id or None, sid)
     for col in ("name", "country", "timezone", "address", "active"):
         val = getattr(b, col)
         if val is not None:

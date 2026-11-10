@@ -1,15 +1,81 @@
 // Settings › Calibration rules: tolerance windows per interval band, "due soon", quarantine on fail, uncertainty ratio.
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { LuPlus, LuTrash2 } from "react-icons/lu";
-import { Button, LoadError, Notice, Switch, errorText, useLoad, useToast } from "../components/ui";
+import { Badge, Button, LoadError, Notice, Switch, errorText, useLoad, useToast } from "../components/ui";
 import type { Rule, TolUnit } from "../components/work";
-import { get, put } from "../lib/api";
+import { get, post, put } from "../lib/api";
 import { useI18n } from "../lib/i18n";
 import type { StringKey } from "../lib/strings";
 
 interface Closure { from: string; to: string; name: string }
 interface Cal { weekend: number[]; closures: Closure[]; shift: "earlier" | "later"; kinds: ("calibration" | "pm")[] }
-interface WS { tolerance: { calibration: Rule[]; pm: Rule[] }; due_soon_days: number; quarantine_on_fail: boolean; uncertainty_ratio_min: number; calendar: Cal }
+interface Esc { accept_before_due_days: number; deviation_after_days: Record<string, number | null>; kinds: ("calibration" | "pm")[]; digest_hour: number }
+interface WS { tolerance: { calibration: Rule[]; pm: Rule[] }; due_soon_days: number; quarantine_on_fail: boolean; uncertainty_ratio_min: number; calendar: Cal; escalation: Esc }
+
+const CRIT = ["critical", "major", "minor", "non_gmp"] as const;
+
+function EscalationEditor({ esc, onChange }: { esc: Esc; onChange: (e: Esc) => void }) {
+  const { t, dateTime } = useI18n();
+  const toast = useToast();
+  const [busy, setBusy] = useState(false);
+  const [log, setLog] = useState<{ items: { id: string; to_email: string; kind: string; subject: string; status: string; created_at: string; last_error: string | null }[]; configured: boolean } | null>(null);
+  useEffect(() => { get("/api/notifications/emails").then(setLog).catch(() => {}); }, []);
+  return (
+    <section className="panel">
+      <div className="panel-head"><h3>{t("es.title")}</h3><span className="spacer" />
+        <Button size="sm" busy={busy} onClick={async () => {
+          setBusy(true);
+          try {
+            const r = await post<Record<string, number>>("/api/notifications/run");
+            toast(t("es.ran", { l1: r.level1 ?? 0, l2: r.level2 ?? 0, l3: r.level3 ?? 0, dev: r.deviations ?? 0, dig: r.digests ?? 0 }));
+            get("/api/notifications/emails").then(setLog).catch(() => {});
+          } finally { setBusy(false); }
+        }}>{t("es.run")}</Button></div>
+      <div className="panel-body stack">
+        <p className="small muted">{t("es.lead")}</p>
+        <label className="row"><span className="grow">{t("es.accept")}</span>
+          <input className="input" type="number" min={0} max={90} style={{ width: 90 }} aria-label={t("es.accept")} value={esc.accept_before_due_days}
+            onChange={(e) => onChange({ ...esc, accept_before_due_days: Number(e.target.value) || 0 })} /></label>
+        <div className="field">
+          <span className="field-label">{t("es.deviation")}</span>
+          <div className="grid-4">
+            {CRIT.map((c) => (
+              <label key={c} className="stack" style={{ gap: 4 }}><span className="small">{t(`crit.${c}` as StringKey)}</span>
+                <select className="select" value={esc.deviation_after_days[c] == null ? "" : String(esc.deviation_after_days[c])}
+                  onChange={(e) => onChange({ ...esc, deviation_after_days: { ...esc.deviation_after_days, [c]: e.target.value === "" ? null : Number(e.target.value) } })}>
+                  <option value="">{t("es.never")}</option>
+                  {[0, 1, 3, 7, 14, 30, 60].map((d) => <option key={d} value={d}>{d}</option>)}
+                </select></label>
+            ))}
+          </div>
+        </div>
+        <div className="field">
+          <span className="field-label">{t("es.kinds")}</span>
+          <div className="chip-row">
+            {(["calibration", "pm"] as const).map((k) => (
+              <button key={k} type="button" className="chip" aria-pressed={esc.kinds.includes(k)}
+                onClick={() => onChange({ ...esc, kinds: esc.kinds.includes(k) ? esc.kinds.filter((x) => x !== k) : [...esc.kinds, k] })}>{t(k === "pm" ? "ws.pm" : "ws.cal")}</button>
+            ))}
+          </div>
+        </div>
+        <label className="row"><span className="grow">{t("es.digestHour")}</span>
+          <select className="select" style={{ width: 110 }} aria-label={t("es.digestHour")} value={esc.digest_hour} onChange={(e) => onChange({ ...esc, digest_hour: Number(e.target.value) })}>
+            {Array.from({ length: 24 }, (_, h) => <option key={h} value={h}>{String(h).padStart(2, "0")}:00</option>)}
+          </select></label>
+        {log && !log.configured && <Notice tone="warn">{t("em.notConfigured")}</Notice>}
+        <h4 className="sheet-section">{t("es.log")}</h4>
+        {!log?.items.length ? <p className="small subtle">{t("es.logEmpty")}</p> : (
+          <div className="table-wrap"><table className="table">
+            <tbody>{log.items.slice(0, 12).map((e) => (
+              <tr key={e.id}><td className="small nowrap">{dateTime(e.created_at)}</td><td className="small">{e.to_email}</td>
+                <td className="small">{e.subject}</td>
+                <td><Badge tone={e.status === "sent" ? "ok" : e.status === "failed" ? "danger" : undefined}>{t(`es.st.${e.status}` as StringKey)}</Badge></td></tr>))}</tbody>
+          </table></div>
+        )}
+      </div>
+    </section>
+  );
+}
 
 function CalendarEditor({ cal, onChange }: { cal: Cal; onChange: (c: Cal) => void }) {
   const { t } = useI18n();
@@ -129,7 +195,7 @@ export function WorkSettingsTab() {
     try {
       setData(await put<{ settings: WS }>("/api/settings/work", { calibration: s.tolerance.calibration, pm: s.tolerance.pm,
         due_soon_days: s.due_soon_days, quarantine_on_fail: s.quarantine_on_fail, uncertainty_ratio_min: s.uncertainty_ratio_min,
-        calendar: { ...s.calendar, closures: s.calendar.closures.filter((c) => c.from && c.name.trim()) } }));
+        calendar: { ...s.calendar, closures: s.calendar.closures.filter((c) => c.from && c.name.trim()) }, escalation: s.escalation }));
       toast(t("list.saved"));
     } catch (e) { setErr(errorText(e, t)); } finally { setBusy(false); }
   };
@@ -142,6 +208,7 @@ export function WorkSettingsTab() {
         <Bands kind="pm" bands={s.tolerance.pm} onChange={(b) => set({ tolerance: { ...s.tolerance, pm: b } })} />
       </div>
       <CalendarEditor cal={s.calendar} onChange={(c) => set({ calendar: c })} />
+      <EscalationEditor esc={s.escalation} onChange={(e) => set({ escalation: e })} />
       <section className="panel"><div className="panel-body stack">
         <label className="row"><span className="grow">{t("ws.dueSoon")}</span>
           <input className="input" type="number" min={1} max={180} style={{ width: 90 }} aria-label={t("ws.dueSoon")} value={s.due_soon_days}

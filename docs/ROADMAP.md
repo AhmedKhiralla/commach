@@ -7,8 +7,8 @@ The certificate AI was moved forward into Phase 2, so the Al-Andalous Medical Co
 | 1 | **Foundation and asset register.** Hierarchy, classes, vendors, assets and components, signed status changes, files, nameplate AI, AI register import, QR labels, overview, demo plant, connected-apps API | Released |
 | 2 | **Calibration** with certificate AI and OOT impact assessments (see below) | Released |
 | 3 | **Preventive maintenance** and annual plan approval (see below) | Released |
-| 4 | **Tasks and notifications** (see below) | Next |
-| 5 | **Forms and records** (see below) | |
+| 4 | **Tasks and notifications** (see below) | Released |
+| 5 | **Forms and records** (see below) | Next |
 | 6 | **Analysis, assistant and Complanning** (see below) | |
 
 ## Phase 2 – Calibration
@@ -69,6 +69,10 @@ Still to come: usage-based triggers from Companorama run hours (Phase 6, with th
 - **Handover and delegation.**
   - Handover of a deactivated user's tasks, schedules, approvals and escalation roles.
   - Temporary delegation for leave.
+
+Released in Phase 4 as described, plus: an in-app notification centre, an e-mail log, a "Run escalations now"
+button, one escalation e-mail per person per run (not one per task), and delegation-aware assignment everywhere
+(My tasks, the calendar feed, acceptance and the "My work" list).
 
 ## Phase 5 – Forms and records
 

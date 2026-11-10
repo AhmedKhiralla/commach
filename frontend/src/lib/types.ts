@@ -41,7 +41,7 @@ export interface AssetClass {
   id: string; code: string; name_en: string; name_ar: string | null; category: Category; calibration_default: boolean;
   pm_default: boolean; description: string | null; active: boolean; asset_count: number;
 }
-export interface Department { id: string; code: string; name_en: string; name_ar: string | null; active: boolean; asset_count: number; }
+export interface Department { id: string; code: string; name_en: string; name_ar: string | null; active: boolean; asset_count: number; head_user_id?: string | null; head_name?: string | null; }
 export interface Contact { id?: string; name: string; position: string | null; phone: string | null; email: string | null; is_primary: boolean; active: boolean; }
 export interface Vendor {
   id: string; code: string; name: string; kind: "calibration_lab" | "service_provider" | "manufacturer" | "supplier";

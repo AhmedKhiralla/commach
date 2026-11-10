@@ -38,10 +38,12 @@ class DeptPatch(BaseModel):
     name_en: str | None = Field(default=None, min_length=1, max_length=120)
     name_ar: str | None = Field(default=None, max_length=120)
     active: bool | None = None
+    head_user_id: str | None = None
     reason: str | None = Field(default=None, max_length=500)
 
 
-DEPT_SQL = ("SELECT d.id, d.code, d.name_en, d.name_ar, d.active,"
+DEPT_SQL = ("SELECT d.id, d.code, d.name_en, d.name_ar, d.active, d.head_user_id,"
+            " (SELECT u.full_name FROM users u WHERE u.id = d.head_user_id) AS head_name,"
             " (SELECT count(*) FROM assets a WHERE a.department_id = d.id) AS asset_count FROM departments d")
 
 
@@ -67,7 +69,15 @@ def update_department(call: Call):
     did = call.path["dept_id"]
     if not call.tx.val("SELECT 1 FROM departments WHERE id = %s::uuid", did):
         raise not_found("Department")
-    _patch(call, "departments", did, call.body, nullable=("name_ar",))
+    b = call.body
+    if "head_user_id" in b.model_fields_set:
+        if b.head_user_id and not call.tx.val("SELECT 1 FROM users WHERE id = %s::uuid AND status = 'active'", b.head_user_id):
+            raise bad("head_user_id", "Choose an active user.")
+        reason_for_change(call, b.reason)
+        call.tx.x("UPDATE departments SET head_user_id = %s::uuid WHERE id = %s::uuid", b.head_user_id or None, did)
+        b = b.model_copy(update={"head_user_id": None})
+        b.model_fields_set.discard("head_user_id")
+    _patch(call, "departments", did, b, nullable=("name_ar",))
     return call.tx.one(DEPT_SQL + " WHERE d.id = %s::uuid", did)
 
 

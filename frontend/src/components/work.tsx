@@ -41,6 +41,12 @@ export interface Schedule {
 
 export interface Person { id: string; full_name: string; email: string; roles: { site_id: string; role: string }[] }
 
+export function usePeople() {
+  const [people, setPeople] = useState<Person[]>([]);
+  useEffect(() => { get<{ items: Person[] }>("/api/people").then((r) => setPeople(r.items)).catch(() => {}); }, []);
+  return people;
+}
+
 export const PERFORMER_ROLES = ["qa_calibration_officer", "engineering_supervisor", "engineering_manager", "maintenance_technician"] as const;
 
 /** Date-only values are calendar days: format them without a time-zone shift. */

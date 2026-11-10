@@ -1,7 +1,7 @@
 import { useEffect, useState, type ReactNode } from "react";
 import {
-  LuBoxes, LuBuilding2, LuCalendarClock, LuCalendarRange, LuClipboardList, LuChartLine, LuChevronDown, LuClipboardCheck, LuFileSpreadsheet, LuFileText,
-  LuHouse, LuKeyRound, LuLanguages, LuListChecks, LuLogOut, LuMapPin, LuMenu, LuMonitor, LuMoon, LuNetwork, LuScrollText,
+  LuBoxes, LuBuilding2, LuCalendarRange, LuClipboardList, LuChartLine, LuChevronDown, LuClipboardCheck, LuFileSpreadsheet, LuFileText,
+  LuHouse, LuKeyRound, LuListTodo, LuOctagonAlert, LuLanguages, LuListChecks, LuLogOut, LuMapPin, LuMenu, LuMonitor, LuMoon, LuNetwork, LuScrollText,
   LuSearch, LuSettings, LuShieldAlert, LuSun, LuTags, LuTruck, LuUsers, LuWrench, LuX,
 } from "react-icons/lu";
 import { useI18n } from "../lib/i18n";
@@ -11,6 +11,7 @@ import { useTheme } from "../lib/theme";
 import type { StringKey } from "../lib/strings";
 import { Button, Menu, MenuItem, initials } from "./ui";
 import { Logo } from "./Logo";
+import { NotificationBell } from "./notify";
 
 type NavItem = { to?: string; label: StringKey; icon: ReactNode; phase?: number };
 type NavGroup = { title?: StringKey; items: NavItem[] };
@@ -26,7 +27,11 @@ function groupsFor(isPlatform: boolean, isAdmin: boolean, canAudit: boolean): Na
     ];
   }
   const groups: NavGroup[] = [
-    { items: [{ to: "/", label: "nav.home", icon: <LuHouse /> }] },
+    { items: [
+      { to: "/", label: "nav.home", icon: <LuHouse /> },
+      { to: "/todo", label: "nav.myTasks", icon: <LuListTodo /> },
+      { to: "/deviations", label: "nav.deviations", icon: <LuOctagonAlert /> },
+    ] },
     { title: "nav.register", items: [
       { to: "/assets", label: "nav.assets", icon: <LuBoxes /> },
       { to: "/import", label: "nav.import", icon: <LuFileSpreadsheet /> },
@@ -49,7 +54,6 @@ function groupsFor(isPlatform: boolean, isAdmin: boolean, canAudit: boolean): Na
       { to: "/departments", label: "nav.departments", icon: <LuNetwork /> },
     ] },
     { title: "nav.coming", items: [
-      { label: "nav.tasks", icon: <LuCalendarClock />, phase: 4 },
       { label: "nav.forms", icon: <LuFileText />, phase: 5 },
       { label: "nav.analysis", icon: <LuChartLine />, phase: 6 },
     ] },
@@ -141,6 +145,7 @@ export function Shell({ children }: { children: ReactNode }) {
           )}
           <span className="spacer" />
           {!u.is_platform_admin && <FindCode />}
+          {!u.is_platform_admin && <NotificationBell />}
           <Menu trigger={(p) => (
             <button type="button" className="user-btn" {...p} aria-label={t("user.menu")}>
               <span className="avatar" aria-hidden>{initials(u.full_name).toUpperCase()}</span>

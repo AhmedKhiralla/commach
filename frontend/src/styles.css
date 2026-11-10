@@ -1757,3 +1757,48 @@ a.cm-tree-name:hover { color: var(--brand); text-decoration: underline; }
 .cm-plan-legend { display: flex; flex-wrap: wrap; gap: 14px; color: var(--text-2); }
 .cm-plan-legend span { display: inline-flex; align-items: center; gap: 6px; }
 .cm-plan-legend i { min-width: 16px; height: 14px; padding: 0; }
+
+/* ------------------------------------------------------------------ tasks and notifications (Phase 4) */
+.cm-bell { position: relative; width: 38px; height: 38px; display: grid; place-items: center; border-radius: var(--r-md); }
+.cm-bell svg { width: 19px; height: 19px; }
+.cm-bell-n { position: absolute; top: 3px; inset-inline-end: 2px; min-width: 17px; height: 17px; padding: 0 4px; border-radius: 9px; background: var(--danger);
+  color: #fff; font-size: 10.5px; font-weight: 700; display: grid; place-items: center; }
+.cm-notes { width: min(380px, calc(100vw - 24px)); max-height: 70vh; display: flex; flex-direction: column; }
+.cm-notes-head, .cm-notes-foot { display: flex; align-items: center; justify-content: space-between; padding: 8px 10px; }
+.cm-notes-head { border-bottom: 1px solid var(--line); }
+.cm-notes-foot { border-top: 1px solid var(--line); }
+.cm-notes ul { list-style: none; margin: 0; padding: 4px; overflow: auto; }
+.cm-notes-empty { padding: 18px 10px; text-align: center; }
+.cm-note { align-items: flex-start !important; white-space: normal !important; text-align: start; gap: 10px; }
+.cm-note .grow { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.cm-note-title { font-weight: 500; }
+.cm-note-body { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.cm-note-dot { flex: none; width: 8px; height: 8px; border-radius: 50%; margin-top: 6px; background: transparent; }
+.cm-note.unread .cm-note-dot { background: var(--brand-solid); }
+.cm-note.unread.lv2 .cm-note-dot, .cm-note.unread.lv3 .cm-note-dot { background: var(--danger); }
+.cm-note.unread.lv1 .cm-note-dot { background: var(--saffron); }
+
+.cm-todo-grid { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr); gap: 16px; align-items: start; }
+@media (max-width: 1100px) { .cm-todo-grid { grid-template-columns: 1fr; } }
+.cm-todo-sec.danger .panel-head h3 { color: var(--danger); }
+.cm-todo-sec.warn .panel-head h3 { color: var(--warn); }
+.cm-todo-list, .cm-todo-ap { list-style: none; margin: 0; padding: 0; }
+.cm-todo-list li { border-top: 1px solid var(--line); }
+.cm-todo-list li.late { box-shadow: inset 3px 0 0 var(--danger); }
+[dir="rtl"] .cm-todo-list li.late { box-shadow: inset -3px 0 0 var(--danger); }
+.cm-todo-row { display: flex; align-items: center; gap: 12px; padding: 10px 16px; color: inherit; text-decoration: none; flex-wrap: wrap; }
+.cm-todo-row:hover { background: var(--surface-2); }
+.cm-todo-row .grow { display: flex; flex-direction: column; min-width: 180px; flex: 1; }
+.cm-todo-when { display: flex; flex-direction: column; align-items: flex-end; min-width: 92px; }
+.cm-todo-tags { gap: 4px; }
+.cm-todo-kind { flex: none; font-size: 10.5px; font-weight: 700; letter-spacing: .04em; padding: 2px 6px; border-radius: 4px; }
+.cm-todo-kind.k-calibration { background: var(--brand-soft); color: var(--brand); }
+.cm-todo-kind.k-pm { background: var(--saffron-soft); color: var(--warn); }
+.cm-todo-ap li { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; padding: 10px 16px; border-top: 1px solid var(--line); }
+.cm-todo-ap li .grow { flex: 1; min-width: 200px; }
+.cm-esc { margin: 4px 0 8px; }
+.menu-item.cm-note { height: auto; padding-block: 8px; font: inherit; font-size: 13px; line-height: 1.35; }
+.cm-notes { margin: -6px; }
+.cm-rs li { flex-wrap: wrap; }
+.cm-rs li .grow { flex: 1 1 100%; }
+.grid-2 > .panel, .grid-3 > .panel { min-width: 0; }

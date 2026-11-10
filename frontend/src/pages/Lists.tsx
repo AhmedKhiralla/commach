@@ -6,6 +6,7 @@ import {
 } from "../components/ui";
 import { get, patch, post } from "../lib/api";
 import { useI18n } from "../lib/i18n";
+import { usePeople } from "../components/work";
 import { Link } from "../lib/router";
 import { usePerms } from "../lib/session";
 import type { StringKey } from "../lib/strings";
@@ -111,10 +112,12 @@ export function Classes() {
 // ------------------------------------------------------------------ departments
 function DeptSheet({ dept, onClose, onSaved }: { dept: Department | null; onClose: () => void; onSaved: () => void }) {
   const { t } = useI18n();
-  const [f, setF] = useState({ code: dept?.code ?? "", name_en: dept?.name_en ?? "", name_ar: dept?.name_ar ?? "", active: dept?.active ?? true, reason: "" });
+  const [f, setF] = useState({ code: dept?.code ?? "", name_en: dept?.name_en ?? "", name_ar: dept?.name_ar ?? "", active: dept?.active ?? true, reason: "", head: dept?.head_user_id ?? "" });
+  const people = usePeople();
   const s = useSave(onSaved, onClose);
   const submit = () => s.run(() => dept
-    ? patch(`/api/departments/${dept.id}`, { name_en: f.name_en, name_ar: f.name_ar || null, active: f.active, reason: f.reason })
+    ? patch(`/api/departments/${dept.id}`, { name_en: f.name_en, name_ar: f.name_ar || null, active: f.active, reason: f.reason,
+        ...((f.head || null) !== (dept.head_user_id ?? null) ? { head_user_id: f.head || null } : {}) })
     : post("/api/departments", { code: f.code, name_en: f.name_en, name_ar: f.name_ar || null }));
   return (
     <Sheet title={dept ? t("dept.edit") : t("dept.new")} lead={dept?.code} onClose={onClose} onSubmit={submit}
@@ -123,6 +126,8 @@ function DeptSheet({ dept, onClose, onSaved }: { dept: Department | null; onClos
       {!dept && <TextField label={t("common.code")} value={f.code} dir="ltr" maxLength={20} onChange={(v) => setF({ ...f, code: v.toUpperCase() })} error={s.errs.code} required />}
       <TextField label={t("af.name_en")} value={f.name_en} onChange={(v) => setF({ ...f, name_en: v })} error={s.errs.name_en} required />
       <TextField label={t("af.name_ar")} value={f.name_ar} onChange={(v) => setF({ ...f, name_ar: v })} dir="rtl" lang="ar" />
+      {dept && <SelectField label={t("head.dept")} value={f.head} onChange={(v) => setF({ ...f, head: v })}
+        options={[{ value: "", label: "—" }, ...people.map((p) => ({ value: p.id, label: p.full_name }))]} />}
       {dept && <><ActiveSwitch value={f.active} onChange={(v) => setF({ ...f, active: v })} /><Reason value={f.reason} onChange={(v) => setF({ ...f, reason: v })} error={s.errs.reason} /></>}
     </Sheet>
   );

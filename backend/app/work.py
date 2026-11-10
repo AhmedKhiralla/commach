@@ -47,9 +47,16 @@ TOLERANCE_DEFAULTS: dict[str, list[dict]] = {
 # Ramadan if the site does no planned maintenance then). weekend uses Python weekdays: Monday 0 ... Friday 4, Saturday 5.
 CALENDAR_DEFAULTS = {"weekend": [4], "closures": [], "shift": "earlier", "kinds": ["pm"]}
 
+# Escalation: level 1 when a task is not accepted N days before it is due and on the due date (assignees and their
+# supervisors); level 2 when the tolerance window ends (department head and QA); level 3 N days later by GMP
+# criticality (site head, with a deviation record). None = no level 3 for that criticality.
+ESCALATION_DEFAULTS = {"accept_before_due_days": 7, "deviation_after_days": {"critical": 0, "major": 7, "minor": 14, "non_gmp": None},
+                       "kinds": ["calibration", "pm"], "digest_hour": 7}
+
 WORK_DEFAULTS = {
     "tolerance": TOLERANCE_DEFAULTS,
     "calendar": CALENDAR_DEFAULTS,
+    "escalation": ESCALATION_DEFAULTS,
     "due_soon_days": 30,           # "due soon" on the overview and work lists
     "quarantine_on_fail": True,    # a failed calibration quarantines the asset with the completion signature
     "uncertainty_ratio_min": 4,    # test uncertainty ratio expected on certificates (warning below it)
@@ -58,10 +65,12 @@ WORK_DEFAULTS = {
 
 def effective_settings(stored: dict | None) -> dict:
     out = {**WORK_DEFAULTS, "tolerance": {k: [dict(b) for b in v] for k, v in TOLERANCE_DEFAULTS.items()},
-           "calendar": dict(CALENDAR_DEFAULTS)}
+           "calendar": dict(CALENDAR_DEFAULTS), "escalation": dict(ESCALATION_DEFAULTS)}
     for k, v in (stored or {}).items():
         if k == "calendar" and isinstance(v, dict):
             out["calendar"] = {**CALENDAR_DEFAULTS, **{x: v[x] for x in CALENDAR_DEFAULTS if x in v}}
+        elif k == "escalation" and isinstance(v, dict):
+            out["escalation"] = {**ESCALATION_DEFAULTS, **{x: v[x] for x in ESCALATION_DEFAULTS if x in v}}
         elif k == "tolerance" and isinstance(v, dict):
             for kind in ("calibration", "pm"):
                 if isinstance(v.get(kind), list) and v[kind]:

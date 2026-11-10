@@ -40,6 +40,9 @@ STATEMENTS = {
     "pm_checked": "Checked by: I have checked this maintenance record and the condition of the equipment.",
     "plan_reviewed": "I have reviewed this annual plan: the assets, intervals and due dates are complete and correct.",
     "plan_approved": "I approve this annual plan and release its work.",
+    "reschedule_approved": "As supervisor I approve moving this task to the new due date for the reason given.",
+    "reschedule_qa_approved": "As QA I approve moving this task beyond its tolerance window for the reason given.",
+    "deviation_closed": "I close this deviation: the root cause is identified and the actions are complete.",
 }
 
 

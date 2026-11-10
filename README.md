@@ -86,9 +86,26 @@ address (`commach.comp11labs.com`) and its own database, with an API that connec
   - The demo plant now also has 10 PM checklists, about 40 machines, utilities and safety items with a year of PM history,
     approved plans for this year and a next-year maintenance plan waiting for QA approval.
 
+- **Phase 4 – Tasks and notifications**
+  - **My tasks**: overdue, due this week and later, waiting for acceptance, to review and sign, approvals waiting for
+    you (reschedules, annual plans, templates and checklists, impact assessments), and open deviations.
+  - **Notifications** under the bell for every escalation, reschedule decision, delegation and handover.
+  - **E-mail** through Gmail (comp11labs@gmail.com, SMTP over SSL): one daily summary per person at the company's hour,
+    and one immediate e-mail per scheduler run for escalations. Each person can switch either off. An e-mail log is in
+    Company settings.
+  - **Calendar feed** (ICS) for Google Calendar and Outlook: a private address per person; only its hash is stored.
+  - **Escalation**: level 1 when a task is not accepted N days before it is due and on the due date (assignees and
+    supervisors); level 2 when the tolerance window ends (plus the department head and QA); level 3 N days later by
+    GMP criticality (plus the site head) with a **deviation** record that QA closes with root cause, actions and an
+    e-signature.
+  - **Rescheduling with approval**: inside the tolerance window the supervisor signs; beyond it the supervisor and
+    then QA sign (different people, never the requester).
+  - **Delegation** for leave (the delegate sees and works the tasks; signing still needs their own role) and
+    **handover** of a leaving user's tasks, schedules, head roles and delegations, optionally with their site roles.
+
 The web app is English and Arabic (right-to-left), with light, dark and system themes, and works on phones and tablets.
 
-See [docs/ROADMAP.md](docs/ROADMAP.md) for the next phases (tasks, calendar and e-mail notifications come next),
+See [docs/ROADMAP.md](docs/ROADMAP.md) for the next phases (forms and records come next),
 [docs/PART11.md](docs/PART11.md) for the 21 CFR Part 11 traceability and [docs/INTEGRATION.md](docs/INTEGRATION.md)
 for connecting Complanning.
 
@@ -139,7 +156,11 @@ ComMach is a **separate service with its own database**, so it is validated, bac
    | `PLATFORM_ADMIN_EMAIL` | your email, used for the first platform administrator |
    | `PLATFORM_ADMIN_PASSWORD` | a temporary password (10+ characters, upper, lower, digit, symbol); you change it at first sign-in |
    | `QWEN_API_KEY` | your Alibaba Cloud Model Studio key (switches AI on) |
-   | `PUBLIC_URL` | `https://commach.comp11labs.com` (printed in the label QR codes) |
+   | `PUBLIC_URL` | `https://commach.comp11labs.com` (used in label QR codes, e-mail links and the calendar feed) |
+   | `GMAIL_APP_PASSWORD` | the Gmail app password of comp11labs@gmail.com (same as the naming worker) — switches e-mail on |
+   | optional `MAIL_FROM` / `MAIL_FROM_NAME` | default `comp11labs@gmail.com` / `ComMach by Comp11 Labs` |
+   | optional `MAIL_BCC` | a copy of every e-mail, e.g. for the first weeks of a pilot |
+   | optional `SCHEDULER_SECONDS` | how often escalations, digests and the e-mail outbox run (default 300; 0 = off) |
    | optional `QWEN_VISION_MODEL` / `QWEN_TEXT_MODEL` | default `qwen-vl-plus` / `qwen-plus` |
    | optional `QWEN_BASE_URL` | default `https://dashscope-intl.aliyuncs.com/compatible-mode/v1` |
 

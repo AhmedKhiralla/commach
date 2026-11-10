@@ -58,6 +58,22 @@ Evidence: `tests/test_calibration.py`.
 
 Evidence: `tests/test_maintenance.py`.
 
+### Escalation, rescheduling, delegation and handover (Phase 4)
+
+- Escalations are recorded once per task, trigger and due date (who was told, when), and audited (`ESCALATED`).
+  Level 3 opens a deviation; a deviation is closed only by a QA approver with root cause, actions and the
+  `deviation_closed` signature, after which it cannot be changed.
+- A due date changes only through an approved reschedule request: `reschedule_approved` by a supervisor, and
+  `reschedule_qa_approved` by QA when the new date is beyond the tolerance window. The requester cannot approve, and the
+  supervisor cannot give the QA approval. The change carries the request's reason into the audit trail.
+- Delegation gives the delegate the work, not the authority: every signature still checks the signer's own role.
+- Handover moves open work to the replacement in one audited step (`HANDOVER`, with the reason and the counts);
+  closed records keep the original names and signatures.
+- E-mails are sent from the outbox and logged (`EMAIL_SENT` / `EMAIL_FAILED`); the calendar feed address is a secret
+  shown once and stored only as its SHA-256.
+
+Evidence: `tests/test_notify.py`.
+
 ## Subpart C — Electronic signatures
 
 | Clause | Requirement | How ComMach meets it | Evidence |

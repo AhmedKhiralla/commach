@@ -250,6 +250,7 @@ def _db_error(err: psycopg.Error) -> ApiError:
     if state == "23503":
         return ApiError(409, "in_use", "This record is linked to other data.")
     if state == "42501":
+        log.warning("Refused by the database: %s", str(err).splitlines()[0][:300])
         return ApiError(403, "forbidden", "You do not have access to this record.")
     log.error("Database error %s: %s", state, err)
     return ApiError(500, "server_error", "Something went wrong on the server. Try again; if it repeats, contact support.")

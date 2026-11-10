@@ -13,7 +13,7 @@ from starlette.responses import FileResponse, JSONResponse, PlainTextResponse
 from starlette.routing import Route
 
 from .config import settings
-from .routers import (ai_routes, assets, audit_trail, auth, company, excel, files, hierarchy, integration, labels, lists,
+from .routers import (ai_routes, assets, audit_trail, auth, company, excel, files, hierarchy, integration, labels, lists, todo,
                       platform, sample, work)
 
 logging.basicConfig(level=os.environ.get("LOG_LEVEL", "INFO"),
@@ -116,6 +116,29 @@ API_ROUTES = [
     Route("/api/tasks/{task_id}/review", work.review_task, methods=["POST"]),
     Route("/api/tasks/{task_id}/cancel", work.cancel_task, methods=["POST"]),
     Route("/api/tasks/{task_id}/certificate", ai_routes.certificate, methods=["POST"]),
+    Route("/api/todo", todo.get_todo, methods=["GET"]),
+    Route("/api/notifications", todo.list_notifications, methods=["GET"]),
+    Route("/api/notifications/read", todo.read_notifications, methods=["POST"]),
+    Route("/api/notifications/run", todo.run_now, methods=["POST"]),
+    Route("/api/notifications/emails", todo.email_log, methods=["GET"]),
+    Route("/api/me/notify", todo.get_notify, methods=["GET"]),
+    Route("/api/me/notify", todo.update_notify, methods=["PUT"]),
+    Route("/api/me/notify/test", todo.test_email, methods=["POST"]),
+    Route("/api/me/calendar", todo.new_calendar_link, methods=["POST"]),
+    Route("/api/me/calendar/revoke", todo.revoke_calendar_link, methods=["POST"]),
+    Route("/api/calendar/{token}.ics", todo.calendar_feed, methods=["GET"]),
+    Route("/api/tasks/{task_id}/reschedule", todo.request_reschedule, methods=["POST"]),
+    Route("/api/reschedules/{reschedule_id}/approve", todo.approve_reschedule, methods=["POST"]),
+    Route("/api/reschedules/{reschedule_id}/reject", todo.reject_reschedule, methods=["POST"]),
+    Route("/api/delegations", todo.list_delegations, methods=["GET"]),
+    Route("/api/delegations", todo.create_delegation, methods=["POST"]),
+    Route("/api/delegations/{delegation_id}/end", todo.end_delegation, methods=["POST"]),
+    Route("/api/users/{user_id}/handover", todo.get_handover, methods=["GET"]),
+    Route("/api/users/{user_id}/handover", todo.do_handover, methods=["POST"]),
+    Route("/api/deviations", todo.list_deviations, methods=["GET"]),
+    Route("/api/deviations/{deviation_id}", todo.get_deviation, methods=["GET"]),
+    Route("/api/deviations/{deviation_id}", todo.update_deviation, methods=["PATCH"]),
+    Route("/api/deviations/{deviation_id}/close", todo.close_deviation, methods=["POST"]),
     Route("/api/plans", work.get_plan, methods=["GET"]),
     Route("/api/plans/pdf", work.plan_pdf, methods=["GET"]),
     Route("/api/plans/review", work.review_plan, methods=["POST"]),
@@ -192,7 +215,12 @@ async def lifespan(app):
     log.info("File store: %s (%s)", settings.data_dir, "persistent" if settings.storage_persistent else "NOT persistent")
     if not settings.storage_persistent:
         log.warning("No Railway volume is attached: uploads are refused until one is mounted.")
+    import asyncio
+    from .notify import scheduler_loop
+    task = asyncio.create_task(scheduler_loop())
+    log.info("E-mail: %s", f"Gmail as {settings.mail_from}" if settings.gmail_app_password else "not configured (GMAIL_APP_PASSWORD)")
     yield
+    task.cancel()
 
 
 def create_app(run_lifespan: bool = True) -> Starlette:

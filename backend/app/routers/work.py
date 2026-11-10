@@ -69,8 +69,16 @@ class CalendarIn(BaseModel):
     kinds: list[Kind] = Field(default_factory=lambda: ["pm"])
 
 
+class EscalationIn(BaseModel):
+    accept_before_due_days: int = Field(default=7, ge=0, le=90)
+    deviation_after_days: dict[Literal["critical", "major", "minor", "non_gmp"], int | None] = Field(default_factory=dict)
+    kinds: list[Kind] = Field(default_factory=lambda: ["calibration", "pm"])
+    digest_hour: int = Field(default=7, ge=0, le=23)
+
+
 class WorkSettingsIn(BaseModel):
     calendar: CalendarIn | None = None
+    escalation: EscalationIn | None = None
     calibration: list[Band] = Field(min_length=1, max_length=12)
     pm: list[Band] | None = Field(default=None, max_length=12)
     due_soon_days: int = Field(default=30, ge=1, le=180)
@@ -104,6 +112,14 @@ def update_work_settings(call: Call):
     data = {"tolerance": {**settings_of(call)["tolerance"], **tol}, "due_soon_days": b.due_soon_days,
             "quarantine_on_fail": b.quarantine_on_fail, "uncertainty_ratio_min": b.uncertainty_ratio_min,
             "calendar": settings_of(call)["calendar"]}
+    data["escalation"] = settings_of(call)["escalation"]
+    if b.escalation is not None:
+        e = b.escalation
+        for k, v in e.deviation_after_days.items():
+            if v is not None and not 0 <= v <= 365:
+                raise bad("escalation", "Use 0 to 365 days.")
+        data["escalation"] = {"accept_before_due_days": e.accept_before_due_days, "kinds": e.kinds, "digest_hour": e.digest_hour,
+                              "deviation_after_days": {**work.ESCALATION_DEFAULTS["deviation_after_days"], **e.deviation_after_days}}
     if b.calendar is not None:
         if any(d < 0 or d > 6 for d in b.calendar.weekend):
             raise bad("calendar", "Weekend days are 0 (Monday) to 6 (Sunday).")
@@ -676,10 +692,13 @@ def _task_filters(call: Call, t0: dt.date) -> tuple[str, list]:
     elif state == "to_review":
         where.append("t.status = 'completed' AND t.reviewed_at IS NULL AND t.source = 'normal'")
     elif state == "mine":
-        where.append("t.status NOT IN ('completed', 'cancelled') AND (t.assigned_user_id = %s OR %s = ANY(t.assignee_user_ids)"
-                     " OR t.responsible_user_id = %s OR t.assignee_roles && %s::text[])")
-        uid = str(call.user["id"])
-        params += [uid, uid, uid, sorted({r["role"] for r in perm_roles(call)})]
+        from ..notify import delegators
+        ids = [str(call.user["id"]), *delegators(call.tx, str(call.user["id"]), t0)]
+        where.append("t.status NOT IN ('completed', 'cancelled') AND (t.assigned_user_id = ANY(%s::uuid[])"
+                     " OR t.assignee_user_ids && %s::uuid[] OR t.responsible_user_id = ANY(%s::uuid[])"
+                     " OR (t.assigned_user_id IS NULL AND EXISTS (SELECT 1 FROM user_site_roles r WHERE r.user_id = ANY(%s::uuid[])"
+                     " AND r.site_id = t.site_id AND r.role = ANY(t.assignee_roles))))")
+        params += [ids, ids, ids, ids]
     if q.get("q"):
         term = "%" + q["q"].strip().replace("%", r"\%")[:80] + "%"
         where.append("(t.number ILIKE %s OR a.code ILIKE %s OR a.name_en ILIKE %s)")
@@ -731,10 +750,25 @@ def _task(call: Call, tid: str) -> dict:
 
 
 def _is_assignee(call: Call, t: dict) -> bool:
+    """Assigned by name, as responsible person or by role — directly or through a current delegation."""
+    from ..notify import delegators
     uid = str(call.user["id"])
     roles = site_roles(call, str(t["site_id"]))
-    return (str(t["assigned_user_id"] or "") == uid or uid in [str(x) for x in t["assignee_user_ids"] or []]
-            or str(t["responsible_user_id"] or "") == uid or bool(roles & set(t["assignee_roles"] or [])))
+    if (str(t["assigned_user_id"] or "") == uid or uid in [str(x) for x in t["assignee_user_ids"] or []]
+            or str(t["responsible_user_id"] or "") == uid or bool(roles & set(t["assignee_roles"] or []))):
+        return True
+    cached = getattr(call, "_delegators", None)
+    if cached is None:
+        cached = delegators(call.tx, uid, today(call))
+        setattr(call, "_delegators", cached)
+    for d in cached:
+        if (str(t["assigned_user_id"] or "") == d or d in [str(x) for x in t["assignee_user_ids"] or []]
+                or str(t["responsible_user_id"] or "") == d):
+            return True
+        if not t["assigned_user_id"] and call.tx.val("SELECT 1 FROM user_site_roles WHERE user_id = %s::uuid AND site_id = %s"
+                                                     " AND role = ANY(%s::text[])", d, t["site_id"], list(t["assignee_roles"] or [])):
+            return True
+    return False
 
 
 def can_perform(call: Call, t: dict) -> bool:
@@ -823,6 +857,12 @@ def task_detail(call: Call, tid: str) -> dict:
         "ai": open_ and rel and perform and t["kind"] == "calibration",
     }
     t["needs_acceptance"] = open_ and needs_acceptance(call, full)
+    from .todo import can_request_reschedule, reschedule_rows
+    t["reschedules"] = reschedule_rows(call, tid)
+    pending = any(r["status"] in ("pending", "supervisor_approved") for r in t["reschedules"])
+    t["perms"]["reschedule"] = open_ and not pending and can_request_reschedule(call, full)
+    t["escalations"] = call.tx.q("SELECT level, trigger, due_date, created_at FROM escalations WHERE task_id = %s::uuid ORDER BY created_at", tid)
+    t["deviation"] = call.tx.one("SELECT id, number, status FROM deviations WHERE task_id = %s::uuid ORDER BY created_at DESC LIMIT 1", tid)
     return t
 
 
@@ -1066,6 +1106,8 @@ def complete_task(call: Call):
         from ..ai_tasks import accept_suggestion
         accept_suggestion(call, b.ai_suggestion_id, "task", tid, certificate_final(t, results))
         call.tx.x("UPDATE tasks SET ai_suggestion_id = %s::uuid WHERE id = %s::uuid", b.ai_suggestion_id, tid)
+    call.tx.x("UPDATE reschedules SET status = 'withdrawn', decision_note = 'The task was completed'"
+              " WHERE task_id = %s::uuid AND status IN ('pending', 'supervisor_approved')", tid)
     call.tx.x("UPDATE tasks SET status = 'completed', verdict = %s, completed_at = now(), completed_by = %s,"
               " completed_by_name = %s, signature_id = %s WHERE id = %s::uuid", v, call.user["id"], call.user["full_name"],
               sig["id"], tid)

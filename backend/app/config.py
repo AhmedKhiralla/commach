@@ -44,6 +44,17 @@ class Settings:
     max_upload_mb: int = field(default_factory=lambda: int(os.environ.get("MAX_UPLOAD_MB", "60")))
     # Public address used in QR codes on labels, e.g. https://commach.comp11labs.com (falls back to the request host).
     public_url: str | None = field(default_factory=lambda: (os.environ.get("PUBLIC_URL") or "").rstrip("/") or None)
+    # E-mail through Gmail (SMTP over SSL), as in the Comp11 naming worker. Without the app password, e-mails stay
+    # in the outbox marked not_configured and the app still shows every notification.
+    mail_from: str = field(default_factory=lambda: os.environ.get("MAIL_FROM", "comp11labs@gmail.com"))
+    mail_from_name: str = field(default_factory=lambda: os.environ.get("MAIL_FROM_NAME", "ComMach by Comp11 Labs"))
+    gmail_app_password: str | None = field(default_factory=lambda: os.environ.get("GMAIL_APP_PASSWORD") or None)
+    smtp_host: str = field(default_factory=lambda: os.environ.get("SMTP_HOST", "smtp.gmail.com"))
+    smtp_port: int = field(default_factory=lambda: int(os.environ.get("SMTP_PORT", "465")))
+    smtp_ssl: bool = field(default_factory=lambda: _bool("SMTP_SSL", True))
+    mail_bcc: str | None = field(default_factory=lambda: os.environ.get("MAIL_BCC") or None)
+    # The scheduler (escalations, digests, e-mail) runs inside the web process every N seconds; 0 switches it off.
+    scheduler_seconds: int = field(default_factory=lambda: int(os.environ.get("SCHEDULER_SECONDS", "300")))
 
 
 settings = Settings()

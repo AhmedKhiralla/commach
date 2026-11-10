@@ -1,5 +1,5 @@
-import { useMemo, useState } from "react";
-import { LuBan, LuEllipsis, LuKeyRound, LuLockOpen, LuPencil, LuPower, LuSearch, LuUserPlus, LuUsers } from "react-icons/lu";
+import { useEffect, useMemo, useState } from "react";
+import { LuArrowRightLeft, LuBan, LuEllipsis, LuKeyRound, LuLockOpen, LuPencil, LuPower, LuSearch, LuUserPlus, LuUsers } from "react-icons/lu";
 import {
   Badge, Button, Confirm, Empty, LoadError, LoadingRows, Menu, MenuItem, Notice, PageHead, SecretReveal, Sheet,
   Switch, TextField, errorText, fieldErrors, useLoad, useToast,
@@ -8,6 +8,49 @@ import { get, patch, post, put } from "../lib/api";
 import { useI18n } from "../lib/i18n";
 import { useSession } from "../lib/session";
 import type { SiteRow } from "./Sites";
+
+function HandoverSheet({ user, users, onClose, onDone }: { user: UserRow; users: UserRow[]; onClose: () => void; onDone: () => void }) {
+  const { t, tx } = useI18n();
+  const toast = useToast();
+  const [h, setH] = useState<{ items: Record<string, unknown> & { total: number; roles: { site_code: string; role: string }[] } } | null>(null);
+  const [to, setTo] = useState("");
+  const [reason, setReason] = useState("");
+  const [copy, setCopy] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  useEffect(() => { get(`/api/users/${user.id}/handover`).then(setH).catch((e) => setErr(errorText(e, t))); }, [user.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  const keys = ["tasks_assigned", "tasks_responsible", "schedules_assigned", "schedules_responsible", "department_head", "site_head", "delegations"];
+  const val = (k: string) => { const v = h?.items[k]; return Array.isArray(v) ? (v.length ? v.join(", ") : "0") : String(v ?? 0); };
+  return (
+    <Sheet title={t("ho.title", { name: user.full_name })} lead={t("ho.lead")} onClose={onClose} onSubmit={async () => {
+      setBusy(true); setErr(null);
+      try {
+        const r = await post<{ to: string }>(`/api/users/${user.id}/handover`, { to_user_id: to, reason, copy_roles: copy });
+        toast(t("ho.done", { name: r.to })); onDone(); onClose();
+      } catch (e) { setErr(errorText(e, t)); setBusy(false); }
+    }} footer={<>
+      <Button onClick={onClose}>{t("common.cancel")}</Button>
+      <Button type="submit" variant="primary" busy={busy} disabled={!to || reason.trim().length < 3}>{t("ho.do")}</Button>
+    </>}>
+      {err && <Notice tone="danger">{err}</Notice>}
+      {h && (h.items.total === 0 ? <Notice>{t("ho.nothing")}</Notice> : (
+        <dl className="cm-facts compact">
+          {keys.map((k) => <div className="cm-fact" key={k}><dt>{tx(`ho.i.${k}`, k)}</dt><dd className="num">{val(k)}</dd></div>)}
+        </dl>
+      ))}
+      {h && h.items.roles.length > 0 && <p className="small muted">{t("ho.roles")}: {h.items.roles.map((r) => `${r.site_code} · ${tx(`role.${r.role}`, r.role)}`).join(", ")}</p>}
+      <div className="field">
+        <label htmlFor="ho-to">{t("ho.to")}</label>
+        <select id="ho-to" className="select" value={to} onChange={(e) => setTo(e.target.value)}>
+          <option value="">—</option>
+          {users.filter((u) => u.id !== user.id && u.status === "active").map((u) => <option key={u.id} value={u.id}>{u.full_name} · {u.email}</option>)}
+        </select>
+      </div>
+      <TextField label={t("ho.reason")} value={reason} onChange={setReason} maxLength={500} />
+      <label className="row"><Switch checked={copy} onChange={setCopy} label={t("ho.copyRoles")} /><span>{t("ho.copyRoles")}</span></label>
+    </Sheet>
+  );
+}
 
 const ROLES = ["qa_approver", "engineering_manager", "engineering_supervisor", "qa_calibration_officer",
   "maintenance_technician", "requester", "auditor"] as const;
@@ -102,6 +145,7 @@ export function Users() {
   const [query, setQuery] = useState("");
   const [editing, setEditing] = useState<UserRow | "new" | null>(null);
   const [confirm, setConfirm] = useState<{ kind: "reset" | "disable"; user: UserRow } | null>(null);
+  const [handover, setHandover] = useState<UserRow | null>(null);
   const [secret, setSecret] = useState<Secret | null>(null);
   const siteName = useMemo(() => new Map((sites.data?.items ?? []).map((s) => [s.id, s.code])), [sites.data]);
   const items = (users.data?.items ?? []).filter((u) => {
@@ -155,7 +199,12 @@ export function Users() {
         }} />}
       {confirm?.kind === "disable" && <Confirm danger title={t("users.disableConfirm", { name: confirm.user.full_name })} body={t("users.disableBody")}
         confirmLabel={t("users.disable")} onClose={() => setConfirm(null)}
-        onConfirm={async () => { await patch(`/api/users/${confirm.user.id}`, { status: "disabled" }); toast(t("users.savedToast")); users.reload(); }} />}
+        onConfirm={async () => {
+          await patch(`/api/users/${confirm.user.id}`, { status: "disabled" }); toast(t("users.savedToast")); users.reload();
+          const h = await get<{ items: { total: number } }>(`/api/users/${confirm.user.id}/handover`).catch(() => null);
+          if (h && h.items.total > 0) setHandover(confirm.user);
+        }} />}
+      {handover && <HandoverSheet user={handover} users={users.data?.items ?? []} onClose={() => setHandover(null)} onDone={users.reload} />}
       {secret && <SecretReveal name={secret.name} email={secret.email} secret={secret.secret} onClose={() => setSecret(null)} />}
     </>
   );
@@ -183,6 +232,7 @@ export function Users() {
                         <MenuItem icon={<LuPencil />} onClick={() => { close(); setEditing(u); }}>{t("common.edit")}</MenuItem>
                         <MenuItem icon={<LuKeyRound />} onClick={() => { close(); setConfirm({ kind: "reset", user: u }); }}>{t("users.resetPassword")}</MenuItem>
                         {u.is_locked && <MenuItem icon={<LuLockOpen />} onClick={async () => { close(); await post(`/api/users/${u.id}/unlock`); toast(t("users.unlockedToast")); users.reload(); }}>{t("users.unlock")}</MenuItem>}
+                        {u.id !== me?.user.id && <MenuItem icon={<LuArrowRightLeft />} onClick={() => { close(); setHandover(u); }}>{t("ho.action")}</MenuItem>}
                         {u.id !== me?.user.id && (u.status === "active"
                           ? <MenuItem danger icon={<LuBan />} onClick={() => { close(); setConfirm({ kind: "disable", user: u }); }}>{t("users.disable")}</MenuItem>
                           : <MenuItem icon={<LuPower />} onClick={async () => { close(); await patch(`/api/users/${u.id}`, { status: "active" }); toast(t("users.savedToast")); users.reload(); }}>{t("users.enable")}</MenuItem>)}

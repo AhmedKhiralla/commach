@@ -2,7 +2,7 @@
 // complete and sign, review (four eyes), cancel.
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
-  LuArrowLeft, LuCheck, LuCircleCheck, LuCircleX, LuFileText, LuHandshake, LuPlus, LuSave, LuSignature, LuSparkles,
+  LuArrowLeft, LuCalendarClock, LuCheck, LuCircleCheck, LuCircleX, LuFileText, LuHandshake, LuPlus, LuSave, LuSignature, LuSparkles,
   LuTrash2, LuTruck, LuUpload, LuX,
 } from "react-icons/lu";
 import { StatusBadge } from "../components/cm";
@@ -18,6 +18,7 @@ import { useSession } from "../lib/session";
 import type { StringKey } from "../lib/strings";
 import { nameOf, type AssetStatus, type Category } from "../lib/types";
 import { PmChecklist, PmParts, type Part } from "./PmChecklist";
+import { RescheduleHistory, RescheduleSheet } from "./Todo";
 
 interface Result {
   id: string | null; item_id: string | null; seq: number; item_type: string; parameter: string; nominal: number | null;
@@ -45,7 +46,11 @@ interface Task extends TaskRow {
   certificate: FileMeta | null; previous: { id: string; number: string; performed_date: string; verdict: Verdict; completed_by_name: string }[];
   signature: Sig | null; review_signature: Sig | null; impact: { id: string; number: string; status: string } | null;
   ai: { id: string; model: string; status: string; changed_fields: Record<string, { ai: unknown; final: unknown }> | null; reviewed_by_name: string | null } | null;
-  perms: { accept: boolean; edit: boolean; complete: boolean; send: boolean; review: boolean; cancel: boolean; ai: boolean };
+  perms: { accept: boolean; edit: boolean; complete: boolean; send: boolean; review: boolean; cancel: boolean; ai: boolean; reschedule?: boolean };
+  reschedules: { id: string; old_due: string; new_due: string; status: string; reason: string; requested_by: string; requested_by_name: string;
+    supervisor_name: string | null; qa_name: string | null }[];
+  escalations: { level: number; trigger: string; due_date: string; created_at: string }[];
+  deviation: { id: string; number: string; status: string } | null;
   needs_acceptance: boolean; next_task?: { id: string; number: string; due_date: string } | null;
   impact_created?: { id: string; number: string } | null;
 }
@@ -141,7 +146,7 @@ export function TaskPage({ taskId }: { taskId: string }) {
   const [ai, setAi] = useState<CertOut | null>(null);
   const [aiApplied, setAiApplied] = useState<string | null>(null);
   const [preview, setPreview] = useState<string | null>(null);
-  const [dialog, setDialog] = useState<null | "complete" | "send" | "review" | "cancel">(null);
+  const [dialog, setDialog] = useState<null | "complete" | "send" | "review" | "cancel" | "reschedule">(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
   const load = (x: Task) => {
@@ -310,6 +315,7 @@ export function TaskPage({ taskId }: { taskId: string }) {
           {edit && <Button icon={<LuSave />} busy={saving} disabled={!dirty || !valid} onClick={() => save().catch(() => {})}>{t("task.save")}</Button>}
           {x.perms.complete && <Button variant="primary" icon={<LuSignature />} disabled={!valid} onClick={() => setDialog("complete")}>{L.complete}</Button>}
           {x.perms.review && <Button variant="primary" icon={<LuSignature />} onClick={() => setDialog("review")}>{L.review}</Button>}
+          {x.perms.reschedule && <Button variant="ghost" icon={<LuCalendarClock />} onClick={() => setDialog("reschedule")}>{t("rs.title")}</Button>}
           {x.perms.cancel && x.status !== "at_vendor" && <Button variant="ghost" icon={<LuX />} onClick={() => setDialog("cancel")}>{t("task.cancel")}</Button>}
         </div>
       </div>
@@ -324,6 +330,9 @@ export function TaskPage({ taskId }: { taskId: string }) {
       {x.impact && <Notice tone={x.impact.status === "approved" ? "ok" : "warn"}>
         <Link to={`/calibration/impacts/${x.impact.id}`}>{t("task.impact", { number: x.impact.number })}</Link> · {t(`ia.status.${x.impact.status}` as StringKey)}
       </Notice>}
+      {x.deviation && <Notice tone={x.deviation.status === "open" ? "danger" : "ok"}><Link to={`/deviations/${x.deviation.id}`}>{x.deviation.number}</Link> · {t(`dev.status.${x.deviation.status}` as StringKey)}</Notice>}
+      {!closed && x.escalations.length > 0 && <div className="chip-row cm-esc">{x.escalations.map((e, i) => (
+        <Badge key={i} tone={e.level >= 2 ? "danger" : "warn"}>{t("nt.level", { n: e.level })} · {t(`esc.${e.trigger}` as StringKey)} · {day(e.created_at.slice(0, 10))}</Badge>))}</div>}
       {x.next_task && <Notice tone="ok">{t(isPm ? "pmt.nextCreated" : "task.nextCreated", { date: day(x.next_task.due_date), number: x.next_task.number })}</Notice>}
 
       <div className="cm-task-grid">
@@ -517,6 +526,7 @@ export function TaskPage({ taskId }: { taskId: string }) {
             </section>
           )}
 
+          <RescheduleHistory items={x.reschedules} me={me?.user.id ?? ""} onChanged={reload} />
           <section className="panel">
             <div className="panel-head"><h3>{isPm ? t("pmt.previous") : t("task.previous")}</h3></div>
             {x.previous.length === 0 ? <div className="panel-body small subtle">{t("task.noPrevious")}</div> : (
@@ -542,6 +552,7 @@ export function TaskPage({ taskId }: { taskId: string }) {
           {aiApplied && <p className="small muted"><LuSparkles aria-hidden /> {t("task.aiRecorded")}</p>}
         </SignDialog>
       )}
+      {dialog === "reschedule" && <RescheduleSheet task={x} onClose={() => setDialog(null)} onDone={reload} />}
       {dialog === "send" && (
         <SignDialog title={`${t("task.send")} · ${x.number}`} lead={x.vendor_name ?? undefined} meaning="sent_to_vendor" onClose={() => setDialog(null)}
           onSign={async (v) => { setData(await post<Task>(`/api/tasks/${x.id}/send`, { ...v, reason: v.reason || null })); toast(t("task.sentToast")); }} />

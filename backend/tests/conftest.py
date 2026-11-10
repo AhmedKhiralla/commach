@@ -187,7 +187,8 @@ def server(db_url, fake_ai):
     env = dict(os.environ, DATABASE_URL=db_url, COOKIE_SECURE="false",
                QWEN_API_KEY="test-key", QWEN_BASE_URL=fake_ai.url, DATA_DIR=str(BACKEND / "tests" / ".data"),
                PLATFORM_ADMIN_EMAIL=PLATFORM_EMAIL, PLATFORM_ADMIN_PASSWORD=PLATFORM_PASSWORD,
-               FRONTEND_DIST=str(BACKEND / "tests" / "no-frontend"), LOG_LEVEL="WARNING")
+               FRONTEND_DIST=str(BACKEND / "tests" / "no-frontend"), LOG_LEVEL="WARNING", SCHEDULER_SECONDS="0",
+               GMAIL_APP_PASSWORD="")
     proc = subprocess.Popen([sys.executable, "-m", "uvicorn", "app.main:app", "--port", str(port),
                              "--host", "127.0.0.1"], cwd=BACKEND, env=env)
     base = f"http://127.0.0.1:{port}"

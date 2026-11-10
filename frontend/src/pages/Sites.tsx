@@ -7,11 +7,12 @@ import {
 import { get, patch, post } from "../lib/api";
 import { COUNTRIES, timeZones } from "../lib/geo";
 import { useI18n } from "../lib/i18n";
+import { usePeople } from "../components/work";
 import { useSession } from "../lib/session";
 
 export interface SiteRow {
   id: string; code: string; name: string; country: string; timezone: string; address: string | null;
-  active: boolean; user_count: number; updated_at: string;
+  active: boolean; user_count: number; updated_at: string; head_user_id?: string | null; head_name?: string | null;
 }
 
 function SiteSheet({ site, onClose, onSaved }: { site: SiteRow | null; onClose: () => void; onSaved: () => void }) {
@@ -23,7 +24,9 @@ function SiteSheet({ site, onClose, onSaved }: { site: SiteRow | null; onClose: 
   const [f, setF] = useState({
     code: site?.code ?? "", name: site?.name ?? "", country: site?.country ?? me?.tenant?.country ?? "EG",
     timezone: site?.timezone ?? me?.tenant?.timezone ?? "Africa/Cairo", address: site?.address ?? "", active: site?.active ?? true,
+    head: site?.head_user_id ?? "",
   });
+  const people = usePeople();
   const [busy, setBusy] = useState(false);
   const [errs, setErrs] = useState<Record<string, string>>({});
   const [general, setGeneral] = useState<string | null>(null);
@@ -32,7 +35,8 @@ function SiteSheet({ site, onClose, onSaved }: { site: SiteRow | null; onClose: 
   const submit = async () => {
     setBusy(true); setErrs({}); setGeneral(null);
     try {
-      if (site) await patch(`/api/sites/${site.id}`, { name: f.name, country: f.country, timezone: f.timezone, address: f.address, active: f.active });
+      if (site) await patch(`/api/sites/${site.id}`, { name: f.name, country: f.country, timezone: f.timezone, address: f.address, active: f.active,
+        head_user_id: f.head || null });
       else await post("/api/sites", { code: f.code, name: f.name, country: f.country, timezone: f.timezone, address: f.address || null });
       toast(t("sites.savedToast")); onSaved(); onClose();
     } catch (e) { setErrs(fieldErrors(e)); setGeneral(errorText(e, t)); setBusy(false); }
@@ -53,6 +57,8 @@ function SiteSheet({ site, onClose, onSaved }: { site: SiteRow | null; onClose: 
         <label htmlFor="site-address">{t("sites.address")} <span className="subtle small">({t("common.optional")})</span></label>
         <textarea id="site-address" className="textarea" value={f.address} onChange={(e) => set("address")(e.target.value)} maxLength={400} />
       </div>
+      {site && <SelectField label={t("head.site")} value={f.head} onChange={set("head")}
+        options={[{ value: "", label: "—" }, ...people.map((p) => ({ value: p.id, label: p.full_name }))]} />}
       {site && (
         <div className="feature" style={{ padding: "4px 0", border: 0 }}>
           <div className="text"><strong>{f.active ? t("sites.deactivate") : t("sites.activate")}</strong><span>{t("sites.deactivateHint")}</span></div>
