@@ -1,0 +1,13 @@
+# ComMach backend
+starlette==1.7.0
+uvicorn[standard]==0.54.0
+pydantic==2.13.5
+psycopg[binary]>=3.2,<4
+tzdata>=2024.1
+# Excel import/export, PDF labels and records, Word templates
+openpyxl==3.1.5
+reportlab>=4.2,<6
+python-docx>=1.1,<2
+# images and PDF pages for the AI (nameplates, certificates, manuals)
+pillow>=10.4,<13
+pypdfium2>=4.30,<6
