@@ -353,3 +353,12 @@ def test_ai(call: Call):
     call.tx.event("INTEGRITY_CHECK", "tenants", str(call.tenant_id), f"AI connection test: {p.label}",
                   {"results": results})
     return {"provider": p.label, "results": results}
+
+
+@endpoint(auth="tenant_user")
+def list_people(call: Call):
+    """Active people of the company with their site roles, for choosing assignees and responsible persons."""
+    return {"items": call.tx.q(
+        "SELECT u.id, u.full_name, u.email, coalesce((SELECT json_agg(json_build_object('site_id', r.site_id, 'role', r.role))"
+        " FROM user_site_roles r WHERE r.user_id = u.id), '[]'::json) AS roles"
+        " FROM users u WHERE u.status = 'active' ORDER BY u.full_name")}

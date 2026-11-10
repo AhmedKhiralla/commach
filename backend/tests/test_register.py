@@ -243,8 +243,8 @@ def test_other_company_cannot_see_assets(plant, two_companies):
     nile = two_companies["NILE"]["admin"]
     status, _, _ = nile.get(f"/api/assets/{plant['press']['id']}")
     assert status == 404
-    _, lst, _ = nile.get("/api/assets")
-    assert lst["total"] == 0
+    _, lst, _ = nile.get("/api/assets?page_size=500")
+    assert plant["press"]["id"] not in {a["id"] for a in lst["items"]}
 
 
 def test_integration_api(plant, server):
@@ -280,6 +280,19 @@ def test_sample_data(server, platform):
     assert site["counts"]["draft"] == 4 and site["counts"]["unavailable"] == 5
     _, lst, _ = admin.get("/api/assets?q=HPLC-01&top=1")
     assert lst["items"][0]["child_count"] == 4
+    assert out["schedules"] > 80 and out["tasks"] > 250 and out["impact_assessments"] == 2
+    _, tasks, _ = admin.get("/api/tasks?state=overdue")
+    assert {t["asset_code"] for t in tasks["items"]} == {"FBD-01-TI", "DPG-104", "THG-111"}
+    assert tasks["counts"]["at_vendor"] == 2 and tasks["counts"]["oot_12m"] == 2 and tasks["counts"]["impacts_open"] == 1
+    _, tree2, _ = admin.get("/api/tree")
+    w = tree2["sites"][0]["counts"]["work"]["calibration"]
+    assert w["overdue"] == 3 and w["due_soon"] >= 6 and w["next"] is not None
+    _, ph, _ = admin.get("/api/assets?q=PH-01")
+    _, phw, _ = admin.get(f"/api/assets/{ph['items'][0]['id']}/work")
+    done = [t for t in phw["tasks"] if t["status"] == "completed"]
+    assert done[0]["verdict"] == "fail" and phw["impacts"][0]["status"] == "draft"
+    _, task, _ = admin.get(f"/api/tasks/{done[0]['id']}")
+    assert len(task["results"]) == 3 and task["results"][1]["ok_found"] is False and task["standards"] == []
     status, again, _ = admin.post("/api/sample-data", {})
     assert status == 409
     # the demo admin was given signing roles and can approve the drafts with one signature

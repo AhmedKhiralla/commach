@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import { LuBuilding2, LuChevronDown, LuChevronRight, LuFactory, LuFileSpreadsheet, LuPlus, LuSparkles } from "react-icons/lu";
 import { CategoryIcon, Kpi } from "../components/cm";
+import { useDay } from "../components/work";
 import { Button, Dialog, Empty, LoadError, Notice, errorText, useLoad, useToast } from "../components/ui";
 import { get, post } from "../lib/api";
 import { useI18n } from "../lib/i18n";
@@ -73,8 +74,12 @@ function NodeRow({ node, depth, view, open, toggle, siteId }: {
 
 function CountCells({ c, view }: { c: Counts; view: View }) {
   const { t, number } = useI18n();
+  const day = useDay();
+  const w = c.work?.[view === "pm" ? "pm" : "calibration"];
   return (
     <span className="cm-tree-cells small">
+      {w && w.overdue > 0 && <span className="text-danger" title={t("ov.overdue")}>{t("ov.overdueN", { n: number(w.overdue) })}</span>}
+      {w?.next && <span className="subtle" title={t("ov.nextDueOn")}>{day(w.next)}</span>}
       {view !== "pm" && <span title={t("ov.calibrated")}><b>{number(c.calibration)}</b> {t("assets.cal")}</span>}
       {view !== "cal" && <span title={t("ov.maintained")}><b>{number(c.pm)}</b> {t("assets.pm")}</span>}
       {c.unavailable > 0 && <span className="text-danger" title={t("ov.unavailable")}>● {number(c.unavailable)}</span>}
@@ -85,6 +90,7 @@ function CountCells({ c, view }: { c: Counts; view: View }) {
 
 function SiteCard({ site, view, groupName }: { site: TreeSite; view: View; groupName?: string }) {
   const { t, number } = useI18n();
+  const day = useDay();
   const all = useMemo(() => {
     const ids: string[] = [];
     const walk = (ns: LocationNode[]) => ns.forEach((n) => { if (n.children.length) ids.push(n.id); walk(n.children); });
@@ -104,6 +110,7 @@ function SiteCard({ site, view, groupName }: { site: TreeSite; view: View; group
         <span className="spacer" />
         <Button size="sm" variant="ghost" onClick={() => setOpen(open.size >= all.length ? new Set() : new Set(all))}>
           {open.size >= all.length ? t("ov.collapse") : t("ov.expand")}</Button>
+        {view !== "pm" && <Link className="btn sm" to={`/calibration?site_id=${site.id}`}>{t("nav.calWork")}</Link>}
         <Link className="btn sm" to={`/assets?site_id=${site.id}${view === "cal" ? "&calibration=1" : view === "pm" ? "&pm=1" : ""}`}>{t("ov.openList")}</Link>
       </div>
       <div className="cm-kpis">
@@ -113,7 +120,14 @@ function SiteCard({ site, view, groupName }: { site: TreeSite; view: View; group
         <Kpi label={t("ov.critical")} value={number(c.critical)} />
         <Kpi label={t("ov.unavailable")} value={number(c.unavailable)} tone={c.unavailable ? "danger" : undefined} />
         <Kpi label={t("ov.drafts")} value={number(c.draft)} tone={c.draft ? "warn" : undefined} />
-        <Kpi label={t("ov.nextDue")} value={<span className="small">{t("ov.nextDueSoon")}</span>} hint={t("ov.dueHint")} />
+        {(() => {
+          const w = c.work?.[view === "pm" ? "pm" : "calibration"];
+          return <>
+            <Kpi label={t("ov.overdue")} value={number(w?.overdue ?? 0)} tone={w?.overdue ? "danger" : undefined} />
+            <Kpi label={t("ov.dueSoon")} value={number(w?.due_soon ?? 0)} tone={w?.due_soon ? "warn" : undefined} />
+            <Kpi label={t("ov.nextDueOn")} value={<span className="cm-kpi-date">{w?.next ? day(w.next) : t("ov.noDue")}</span>} />
+          </>;
+        })()}
       </div>
       <div className="cm-cats">
         {CATEGORIES.filter((k) => c.categories[k]).map((k) => (

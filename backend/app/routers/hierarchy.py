@@ -204,8 +204,13 @@ def update_line(call: Call):
 
 
 # ------------------------------------------------------------------ tree with counts
+def _w() -> dict:
+    return {"open": 0, "overdue": 0, "due_soon": 0, "next": None}
+
+
 def _empty() -> dict:
-    return {"total": 0, "calibration": 0, "pm": 0, "critical": 0, "unavailable": 0, "draft": 0, "categories": {}}
+    return {"total": 0, "calibration": 0, "pm": 0, "critical": 0, "unavailable": 0, "draft": 0, "categories": {},
+            "work": {"calibration": _w(), "pm": _w()}}
 
 
 def _add(c: dict, other: dict) -> None:
@@ -213,6 +218,12 @@ def _add(c: dict, other: dict) -> None:
         c[k] += other[k]
     for k, v in other["categories"].items():
         c["categories"][k] = c["categories"].get(k, 0) + v
+    for kind in ("calibration", "pm"):
+        a, b = c["work"][kind], other["work"][kind]
+        for k in ("open", "overdue", "due_soon"):
+            a[k] += b[k]
+        if b["next"] and (a["next"] is None or b["next"] < a["next"]):
+            a["next"] = b["next"]
 
 
 def build_tree(call: Call, site_filter: list[str] | None) -> dict:
@@ -244,6 +255,25 @@ def build_tree(call: Call, site_filter: list[str] | None) -> dict:
         c["unavailable"] += n if r["status"] in UNAVAILABLE else 0
         c["draft"] += n if r["status"] == "draft" else 0
         c["categories"][r["category"]] = c["categories"].get(r["category"], 0) + n
+
+    from .work import settings_of, today
+    t0 = today(call)
+    import datetime as _dt
+    soon = t0 + _dt.timedelta(days=settings_of(call)["due_soon_days"])
+    wrows = call.tx.q(
+        "SELECT a.site_id, a.location_id, t.kind, count(*) AS n,"
+        " count(*) FILTER (WHERE t.window_end < %s) AS overdue,"
+        " count(*) FILTER (WHERE t.window_end >= %s AND t.due_date <= %s) AS due_soon, min(t.due_date) AS next"
+        "  FROM tasks t JOIN assets a ON a.id = t.asset_id"
+        " WHERE t.site_id = ANY(%s::uuid[]) AND t.status NOT IN ('completed', 'cancelled')"
+        "   AND a.status = ANY(%s::text[]) GROUP BY 1, 2, 3", t0, t0, soon, site_ids, list(LIVE))
+    for r in wrows:
+        key = str(r["location_id"]) if r["location_id"] else f"site:{r['site_id']}"
+        w = direct.setdefault(key, _empty())["work"][r["kind"]]
+        w["open"] += r["n"]
+        w["overdue"] += r["overdue"]
+        w["due_soon"] += r["due_soon"]
+        w["next"] = r["next"] if w["next"] is None or r["next"] < w["next"] else w["next"]
 
     nodes = {str(l["id"]): {**l, "children": [], "counts": _empty()} for l in locs}
     roots: dict[str, list] = {sid: [] for sid in site_ids}

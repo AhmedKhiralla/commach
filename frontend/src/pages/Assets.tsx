@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { LuBoxes, LuDownload, LuFileSpreadsheet, LuPlus, LuPrinter, LuSignature, LuX } from "react-icons/lu";
+import { LuBoxes, LuCalendarClock, LuDownload, LuFileSpreadsheet, LuPlus, LuPrinter, LuSignature, LuX } from "react-icons/lu";
 import { CategoryIcon, Programmes, SignStatus, StatusBadge } from "../components/cm";
 import { Button, Empty, LoadError, LoadingRows, Menu, MenuItem, PageHead, useLoad } from "../components/ui";
 import { get, qs } from "../lib/api";
@@ -9,6 +9,7 @@ import { usePerms, useSession } from "../lib/session";
 import type { StringKey } from "../lib/strings";
 import { CATEGORIES, STATUSES, nameOf, type AssetRow } from "../lib/types";
 import { AssetForm } from "./AssetForm";
+import { SchedulePlanner, useDay } from "../components/work";
 
 const FILTER_KEYS = ["site_id", "location_id", "category", "status", "q", "calibration", "pm", "top", "include_retired",
   "class_id", "department_id", "line_id", "unplaced", "page"] as const;
@@ -29,6 +30,8 @@ export function Assets() {
   const [q, setQ] = useState(f.q ?? "");
   const [sel, setSel] = useState<Map<string, AssetRow>>(new Map());
   const [signing, setSigning] = useState(false);
+  const [planning, setPlanning] = useState(false);
+  const day = useDay();
   const [creating, setCreating] = useState(() => new URLSearchParams(window.location.search).get("new") === "1");
   const list = useLoad(() => get<{ items: AssetRow[]; total: number; page: number; page_size: number }>(`/api/assets${qs({ ...f, page_size: 100 })}`), [JSON.stringify(f)]);
   useEffect(() => { navigate(`/assets${qs(f)}`, true); }, [JSON.stringify(f)]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -86,6 +89,7 @@ export function Assets() {
           <div className="cm-selbar">
             <strong>{t("assets.selected", { n: sel.size })}</strong>
             <Button size="sm" variant="primary" icon={<LuSignature />} onClick={() => setSigning(true)}>{t("assets.changeStatus")}</Button>
+            {canEdit && <Button size="sm" icon={<LuCalendarClock />} onClick={() => setPlanning(true)}>{t("cw.plan")}</Button>}
             <Menu trigger={(p) => <Button size="sm" icon={<LuPrinter />} {...p}>{t("assets.labels")}</Button>}>
               {(close) => <>
                 <MenuItem onClick={() => { close(); labels("&layout=a4&size=large"); }}>{t("assets.labelsA4")}</MenuItem>
@@ -105,9 +109,9 @@ export function Assets() {
                 <th className="cell-tight"><input type="checkbox" aria-label={t("assets.selectAll")} checked={allSel}
                   onChange={() => setSel((s) => { const x = new Map(s); items.forEach((a) => allSel ? x.delete(a.id) : x.set(a.id, a)); return x; })} /></th>
                 <th>{t("assets.col.code")}</th><th>{t("assets.col.name")}</th><th>{t("assets.col.class")}</th>
-                <th>{t("assets.col.location")}</th><th>{t("assets.col.prog")}</th><th>{t("assets.col.status")}</th>
+                <th>{t("assets.col.location")}</th><th>{t("assets.col.prog")}</th><th>{t("assets.col.nextCal")}</th><th>{t("assets.col.status")}</th>
               </tr></thead>
-              {!list.data ? <LoadingRows rows={8} cols={7} /> : (
+              {!list.data ? <LoadingRows rows={8} cols={8} /> : (
                 <tbody>
                   {items.map((a) => (
                     <tr key={a.id} className={sel.has(a.id) ? "selected" : ""}>
@@ -124,6 +128,7 @@ export function Assets() {
                       <td><span className="row nowrap small"><CategoryIcon category={a.category} />{lang === "ar" && a.class_name_ar ? a.class_name_ar : a.class_name_en}</span></td>
                       <td className="small nowrap">{a.site_code}{locName(a) ? ` / ${locName(a)}` : ""}{a.line_code ? ` · ${a.line_code}` : ""}</td>
                       <td><Programmes cal={a.calibration_required} pm={a.pm_required} /></td>
+                      <td className={`nowrap small num ${a.cal_overdue ? "text-danger" : ""}`}>{a.cal_due ? day(a.cal_due) : a.calibration_required ? <span className="subtle">—</span> : ""}</td>
                       <td><StatusBadge status={a.status} /></td>
                     </tr>
                   ))}
@@ -141,6 +146,7 @@ export function Assets() {
         )}
       </div>
       {signing && <SignStatus assets={Array.from(sel.values())} onClose={() => setSigning(false)} onDone={() => { setSel(new Map()); list.reload(); }} />}
+      {planning && <SchedulePlanner assets={Array.from(sel.values())} onClose={() => setPlanning(false)} onDone={() => { setSel(new Map()); list.reload(); }} />}
       {creating && <AssetForm siteId={f.site_id ?? siteId} onClose={() => { setCreating(false); }}
         onSaved={(a) => navigate(`/assets/${a.id}`)} />}
     </>

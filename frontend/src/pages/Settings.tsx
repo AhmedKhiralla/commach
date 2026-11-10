@@ -8,6 +8,7 @@ import { useI18n } from "../lib/i18n";
 import { navigate } from "../lib/router";
 import { useSession, type Policy } from "../lib/session";
 import type { StringKey } from "../lib/strings";
+import { WorkSettingsTab } from "./WorkSettings";
 
 interface SettingsData {
   company: { id: string; code: string; name: string; country: string; timezone: string; default_language: "en" | "ar" };
@@ -21,7 +22,7 @@ interface SettingsData {
   security_limits: Record<string, [number, number]>;
 }
 
-const TABS = ["company", "features", "ai", "terms", "security", "apps", "demo"] as const;
+const TABS = ["company", "features", "work", "ai", "terms", "security", "apps", "demo"] as const;
 type Tab = (typeof TABS)[number];
 
 function useSaver(onSaved: (d: SettingsData) => void) {
@@ -300,7 +301,7 @@ export function Settings() {
   const initialTab = new URLSearchParams(window.location.search).get("tab") as Tab | null;
   const [tab, setTabState] = useState<Tab>(initialTab && TABS.includes(initialTab) ? initialTab : "company");
   const setTab = (x: Tab) => { setTabState(x); navigate(`/settings?tab=${x}`, true); };
-  const labels: Record<Tab, StringKey> = { company: "settings.tab.company", features: "settings.tab.features", ai: "settings.tab.ai", terms: "settings.tab.terms", security: "settings.tab.security", apps: "settings.tab.apps", demo: "settings.tab.demo" };
+  const labels: Record<Tab, StringKey> = { company: "settings.tab.company", features: "settings.tab.features", work: "settings.tab.work", ai: "settings.tab.ai", terms: "settings.tab.terms", security: "settings.tab.security", apps: "settings.tab.apps", demo: "settings.tab.demo" };
   return (
     <>
       <PageHead title={t("settings.title")} lead={t("settings.lead", { company: me?.tenant?.name ?? "" })} />
@@ -315,6 +316,7 @@ export function Settings() {
         <div role="tabpanel">
           {tab === "company" && <CompanyTab data={data} onSaved={setData} />}
           {tab === "features" && <FeaturesTab key={JSON.stringify(data.features)} data={data} onSaved={setData} />}
+          {tab === "work" && <WorkSettingsTab />}
           {tab === "terms" && <TermsTab data={data} onSaved={setData} />}
           {tab === "security" && <SecurityTab key={JSON.stringify(data.security)} data={data} onSaved={setData} />}
           {tab === "ai" && <AiTab key={JSON.stringify(data.ai)} data={data} onSaved={setData} />}

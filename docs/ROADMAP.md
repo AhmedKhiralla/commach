@@ -1,12 +1,12 @@
 # ComMach roadmap
 
-The certificate AI was moved forward, so the Al-Andalous Medical Company demo can show it after Phase 2.
+The certificate AI was moved forward into Phase 2, so the Al-Andalous Medical Company demo can show it now.
 
 | Phase | Content | Status |
 | --- | --- | --- |
 | 1 | **Foundation and asset register.** Hierarchy, classes, vendors, assets and components, signed status changes, files, nameplate AI, AI register import, QR labels, overview, demo plant, connected-apps API | Released |
-| 2 | **Calibration** (see below) | Next |
-| 3 | **Preventive maintenance** (see below) | |
+| 2 | **Calibration** with certificate AI and OOT impact assessments (see below) | Released |
+| 3 | **Preventive maintenance** (see below) | Next |
 | 4 | **Tasks and notifications** (see below) | |
 | 5 | **Forms and records** (see below) | |
 | 6 | **Analysis, assistant and Complanning** (see below) | |
@@ -31,6 +31,12 @@ The certificate AI was moved forward, so the Al-Andalous Medical Company demo ca
   - Side-by-side review against the certificate image, then an e-signature. The audit trail keeps the AI value and the final value for every field.
 - **OOT handling.** Automatic quarantine, plus an **impact assessment draft** (AI) listing affected rooms, products and the period since the last good calibration.
 - **Labels and dates.** Labels print the calibrated-on and due dates; the overview shows the nearest due date and overdue counts.
+
+Released in Phase 2 as described, plus: task acceptance (switchable), four-eyes review of a completed calibration,
+signed send-to-vendor and cancellation, schedule changes carried into the open task with a reason for change,
+and certificate readings becoming the points when a schedule has no template.
+Still to come with later phases: e-mail and calendar reminders and escalation (Phase 4), the results-analysis
+dashboard (Phase 6).
 
 ## Phase 3 – Preventive maintenance
 

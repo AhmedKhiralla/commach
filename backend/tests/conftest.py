@@ -139,6 +139,21 @@ class FakeAI:
                        "classes": {"Magnehelic": "DPGAUGE", "Balance": "BALANCE", "P. gauge": "PGAUGE", "Weird": "NOPE"},
                        "status": {"OK": "in_service", "Under repair": "out_of_service"},
                        "criticality": {}, "notes": "Check the Location column."}
+        elif "calibration certificates" in text:
+            content = {"certificate_no": "NCS-2026-0457", "lab_name": "Nile Calibration Services",
+                       "accreditation_no": "EGAC CL-000", "calibration_date": "2026-01-10", "next_due_date": "2027-01-10",
+                       "instrument": {"manufacturer": "Sartorius", "model": "X1", "serial_no": "sn-ext-1"},
+                       "environment": {"temperature": "21.0 °C", "humidity": "45 %RH"},
+                       "standards": [{"description": "E2 weights", "id": "W-9", "certificate_no": "W-2025-1", "due_date": "2027-05-01"}],
+                       "readings": [{"parameter": "Mass", "nominal": "100", "unit": "g", "as_found": "100,0004", "uncertainty": 0.0001},
+                                    {"parameter": "Mass", "nominal": 200, "unit": "g", "as_found": 200.0002, "uncertainty": 0.0002},
+                                    {"parameter": "Mass", "nominal": 50, "unit": "g", "as_found": 50.0001}],
+                       "conformity": "The instrument complies with the stated tolerance.", "notes": ""}
+        elif "impact assessment" in text:
+            content = {"summary": "The balance was found out of tolerance at 100 g.", "scope": "QC balance room R-203.",
+                       "products": "Review assay results weighed on the balance during the period.", "risk": "medium",
+                       "risk_reason": "Error is small relative to assay limits.", "actions": ["Quarantine", "Review results"],
+                       "conclusion": "Draft: no product impact expected pending the review."}
         else:
             content = {"ok": True}
         return {"model": body["model"], "choices": [{"message": {"role": "assistant", "content": json.dumps(content, ensure_ascii=False)}}],

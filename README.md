@@ -45,9 +45,32 @@ address (`commach.comp11labs.com`) and its own database, with an API that connec
   - **One-click demo plant.** About 140 assets with components, two calibration labs and realistic statuses.
   - **Connected apps.** A per-company key and a read-only API (`/api/integration/v1/assets`, `/events`) for Complanning.
 
+- **Phase 2 – Calibration**
+  - **Templates** per instrument type: points, nominal values, tolerances (± value, ± % or limits), method and
+    standards required. Approved by e-signature; changed only by a new version, which moves the schedules with it.
+  - **Schedules**, one asset or hundreds at once, with a preview of the next due dates:
+    - interval in days, weeks, months or years; **floating** (from the date done) or fixed
+    - **tolerance windows** per interval band in company settings, asymmetric, in days, weeks, months or % of the
+      interval, overridable per schedule
+    - internal, or an **external vendor** with an internal responsible person
+    - assigned to roles and/or named people; certificate required or not
+  - **Calibration work list:** overdue, due soon, at vendor, in progress, to review, out of tolerance, with KPIs.
+  - **Calibration task:** accept, send to the vendor (signed; the asset goes *out for calibration*), as-found / as-left
+    readings with live in/out marks, reference standards (blocked when overdue), certificate upload,
+    **complete and sign**, four-eyes **review and sign**, signed cancellation. The next task is created from the actual date.
+  - **Certificate AI.** A PDF or photo of the certificate is read: certificate number, date, environment, readings and
+    uncertainty, mapped to the points, and checked (serial, date, coverage, tolerance, uncertainty ratio, lab
+    conformity statement, accreditation, standards). The person applies, corrects and signs; the AI value and the final
+    value of every field are recorded.
+  - **Out of tolerance:** a failed calibration quarantines the asset under the completion signature; any OOT opens an
+    **impact assessment** (period since the last good calibration, scope, products, risk, actions, conclusion) with an
+    **AI first draft**, approved by QA with an e-signature.
+  - Overview, asset list and labels show the next due date and overdue counts; the asset page has a Calibration tab.
+  - The demo plant now carries about two years of calibration history, two OOT results and their assessments.
+
 The web app is English and Arabic (right-to-left), with light, dark and system themes, and works on phones and tablets.
 
-See [docs/ROADMAP.md](docs/ROADMAP.md) for the next phases (calibration with certificate AI comes next),
+See [docs/ROADMAP.md](docs/ROADMAP.md) for the next phases (preventive maintenance comes next),
 [docs/PART11.md](docs/PART11.md) for the 21 CFR Part 11 traceability and [docs/INTEGRATION.md](docs/INTEGRATION.md)
 for connecting Complanning.
 

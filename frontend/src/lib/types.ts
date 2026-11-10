@@ -13,7 +13,9 @@ export type LocationKind = "building" | "area" | "room";
 export interface Counts {
   total: number; calibration: number; pm: number; critical: number; unavailable: number; draft: number;
   categories: Record<string, number>;
+  work?: { calibration: WorkCounts; pm: WorkCounts };
 }
+export interface WorkCounts { open: number; overdue: number; due_soon: number; next: string | null }
 
 export interface LocationNode {
   id: string; site_id: string; parent_id: string | null; kind: LocationKind; code: string; name_en: string;
@@ -56,6 +58,7 @@ export interface AssetRow {
   category: Category; location_code: string | null; location_name_en: string | null; location_name_ar: string | null;
   parent_code: string | null; site_code: string; line_code: string | null; department_code: string | null;
   child_count: number; status_changed_at: string | null; updated_at: string;
+  cal_due?: string | null; cal_overdue?: boolean | null; pm_due?: string | null; cal_last?: string | null;
 }
 
 export interface AssetFile {

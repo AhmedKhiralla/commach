@@ -7,9 +7,12 @@ Statuses of demo assets are set directly and recorded as "demo data" in the stat
 from __future__ import annotations
 
 import datetime as dt
+import hashlib
+import json
 
 from pydantic import BaseModel
 
+from .. import work
 from ..api import ApiError, Call, endpoint
 
 GROUP = ("EG", "Egypt operations")
@@ -321,12 +324,250 @@ def load_sample(call: Call):
             tx.x("INSERT INTO asset_status_history (tenant_id, asset_id, from_status, to_status, reason, source, user_id, user_name)"
                  " VALUES (%s, %s, NULL, %s, %s, 'demo_data', %s, %s)", tid, aid, status,
                  note or "Loaded as demonstration data", call.user["id"], call.user["full_name"])
+    cal_counts = load_calibration(call, sid, ids, vendors, today)
     tx.x("SELECT set_config('app.status_change', '', true)")
     if b.give_me_roles:
         for role in ("qa_approver", "engineering_manager", "qa_calibration_officer"):
             tx.x("INSERT INTO user_site_roles (tenant_id, user_id, site_id, role) VALUES (%s, %s, %s::uuid, %s)"
                  " ON CONFLICT DO NOTHING", tid, call.user["id"], sid, role)
     tx.event("SAMPLE_DATA", "sites", sid, "Demo plant",
-             {"assets": len(A), "locations": len(LOCATIONS), "lines": len(LINES), "vendors": len(VENDORS)})
+             {"assets": len(A), "locations": len(LOCATIONS), "lines": len(LINES), "vendors": len(VENDORS), **cal_counts})
     return {"site_id": sid, "assets": len(A), "locations": len(LOCATIONS), "lines": len(LINES),
-            "departments": len(DEPARTMENTS), "vendors": len(VENDORS)}
+            "departments": len(DEPARTMENTS), "vendors": len(VENDORS), **cal_counts}
+
+
+# ================================================================== calibration demo
+# (code, title, points [(parameter, nominal, unit, mode, tol)], method)
+TEMPLATES = [
+    ("CAL-BAL-ANA", "Analytical balance 220 g", [("Mass", 10, "g", "abs", 0.0002), ("Mass", 50, "g", "abs", 0.0003),
+                                                  ("Mass", 100, "g", "abs", 0.0005), ("Mass", 200, "g", "abs", 0.0008)], "SOP-QC-021"),
+    ("CAL-BAL-PREC", "Precision / top-loading balance", [("Mass", 100, "g", "abs", 0.02), ("Mass", 1000, "g", "abs", 0.05),
+                                                         ("Mass", 3000, "g", "abs", 0.1)], "SOP-QC-022"),
+    ("CAL-BAL-FLOOR", "Platform and floor scales", [("Mass", 20, "kg", "pct", 0.1), ("Mass", 100, "kg", "pct", 0.1)], "SOP-ENG-031"),
+    ("CAL-PH", "pH meter 3-point", [("pH buffer", 4.01, "pH", "abs", 0.05), ("pH buffer", 7.00, "pH", "abs", 0.05),
+                                    ("pH buffer", 10.01, "pH", "abs", 0.05)], "SOP-QC-030"),
+    ("CAL-HPLC", "HPLC performance check", [("Flow rate", 1.000, "mL/min", "pct", 2), ("Wavelength accuracy", 486.0, "nm", "abs", 1),
+                                            ("Column oven", 40.0, "°C", "abs", 2)], "SOP-QC-040"),
+    ("CAL-TEMP", "Process temperature probe", [("Temperature", 25, "°C", "abs", 1.0), ("Temperature", 70, "°C", "abs", 1.0),
+                                               ("Temperature", 120, "°C", "abs", 1.0)], "SOP-ENG-041"),
+    ("CAL-TEMP-LAB", "Laboratory temperature sensor", [("Temperature", 5, "°C", "abs", 0.5), ("Temperature", 25, "°C", "abs", 0.5),
+                                                       ("Temperature", 40, "°C", "abs", 0.5)], "SOP-QC-042"),
+    ("CAL-RH", "Humidity sensor", [("Relative humidity", 33, "%RH", "abs", 3), ("Relative humidity", 75, "%RH", "abs", 3)], "SOP-QC-043"),
+    ("CAL-THG", "Thermo-hygrometer", [("Temperature", 25, "°C", "abs", 0.5), ("Relative humidity", 50, "%RH", "abs", 3)], "SOP-ENG-044"),
+    ("CAL-PG-LOW", "Pressure gauge up to 10 bar", [("Pressure", 2, "bar", "abs", 0.16), ("Pressure", 5, "bar", "abs", 0.16),
+                                                   ("Pressure", 8, "bar", "abs", 0.16)], "SOP-ENG-051"),
+    ("CAL-DPG-60", "Room DP gauge 0–60 Pa", [("Differential pressure", 10, "Pa", "abs", 2), ("Differential pressure", 30, "Pa", "abs", 2),
+                                             ("Differential pressure", 50, "Pa", "abs", 2)], "SOP-ENG-052"),
+    ("CAL-DPG-250", "Filter DP gauge 0–250 Pa", [("Differential pressure", 50, "Pa", "abs", 5), ("Differential pressure", 125, "Pa", "abs", 5),
+                                                 ("Differential pressure", 200, "Pa", "abs", 5)], "SOP-ENG-053"),
+]
+
+SPECIAL_DUE = {  # days from today for the open task (negative = overdue)
+    "FBD-01-TI": -25, "DPG-104": -14, "THG-111": -40,
+    "BAL-IPC-01": 3, "THG-103": 5, "LOG-01": 6, "PH-01": 2, "DS-01-TP": 9, "WTS-02": 12,
+}
+
+
+def _h(code: str) -> float:
+    return int(hashlib.sha256(code.encode()).hexdigest()[:8], 16) / 0xFFFFFFFF
+
+
+def _template_for(x: dict) -> str | None:
+    code, cls, rng = x["code"], x["cls"], x["rng"] or (None, None, None)
+    unit, hi = rng[2], rng[1]
+    if cls == "BALANCE":
+        return "CAL-BAL-ANA" if unit == "g" and (hi or 0) <= 220 else "CAL-BAL-PREC" if unit == "g" else "CAL-BAL-FLOOR"
+    if code == "PH-01":
+        return "CAL-PH"
+    if code in ("HPLC-01", "HPLC-02"):
+        return "CAL-HPLC"
+    if cls == "THERMO":
+        return "CAL-THG"
+    if cls == "DPGAUGE":
+        return "CAL-DPG-60" if hi == 60 else "CAL-DPG-250" if hi == 250 else None
+    if cls == "PGAUGE":
+        return "CAL-PG-LOW" if hi is not None and hi <= 10 else None
+    if unit == "%RH":
+        return "CAL-RH"
+    if unit == "°C" and cls in ("SENSOR", "LOGGER"):
+        return "CAL-TEMP-LAB" if (hi or 0) <= 70 else "CAL-TEMP"
+    return None
+
+
+def _plan(x: dict) -> tuple[int, str, str, str | None]:
+    """interval value, unit, performer, vendor code"""
+    cls = x["cls"]
+    if cls in ("WEIGHTS", "REFSTD", "TORQUE"):
+        return 1, "year", "external", "NCS"
+    if cls in ("BALANCE", "LABINST", "TOOL") or x["code"] in ("MD-01", "CW-01"):
+        return 1, "year", "external", "DMI"
+    if cls in ("SAFETY",):
+        return 1, "year", "external", "NCS"
+    if cls in ("DPGAUGE", "THERMO", "SENSOR", "LOGGER", "PGAUGE", "TRANSMIT"):
+        return 6, "month", "internal", None
+    return 1, "year", "external", "NCS"   # chambers, fridges, ovens, incubators: temperature mapping by the lab
+
+
+def load_calibration(call: Call, sid: str, ids: dict[str, str], vendors: dict[str, str], today: dt.date) -> dict:
+    tx, tid = call.tx, call.tenant_id
+    settings = work.effective_settings(tx.val("SELECT work_settings FROM tenants WHERE id = %s", tid))
+    classes = {r["code"]: r["id"] for r in tx.q("SELECT id, code FROM asset_classes")}
+    templates: dict[str, dict] = {}
+    for code, title, points, method in TEMPLATES:
+        t = tx.one("INSERT INTO templates (tenant_id, kind, code, title, method_ref, status, source, standards_note)"
+                   " VALUES (%s, 'calibration', %s, %s, %s, 'draft', 'demo', %s) RETURNING id", tid, code, title, method,
+                   "Traceable reference standard with a valid certificate; test uncertainty ratio 4:1 or better")
+        items = []
+        for n, (param, nominal, unit, mode, tol) in enumerate(points, start=1):
+            iid = tx.val("INSERT INTO template_items (tenant_id, template_id, seq, item_type, parameter, nominal, unit, tol_mode,"
+                         " tol_minus, tol_plus) VALUES (%s, %s, %s, 'point', %s, %s, %s, %s, %s, %s) RETURNING id",
+                         tid, t["id"], n, param, nominal, unit, mode, tol, tol)
+            item = {"id": iid, "seq": n, "parameter": param, "nominal": nominal, "unit": unit, "tol_mode": mode,
+                    "tol_minus": tol, "tol_plus": tol}
+            item["low"], item["high"] = work.limits(item)
+            items.append(item)
+        tx.x("UPDATE templates SET status = 'approved', approved_at = now(), approved_by_name = 'QA approver (demo)'"
+             " WHERE id = %s", t["id"])
+        templates[code] = {"id": t["id"], "items": items}
+
+    std_for = {"°C": "RTD-REF-01", "%RH": "HYG-REF-01", "bar": "PG-REF-01", "Pa": "PG-REF-01", "g": "WTS-01", "kg": "WTS-03"}
+    counters: dict[str, int] = {}
+
+    def number(year: int) -> str:
+        counters[year] = counters.get(year, 0) + 1
+        return f"CAL-{year}-{counters[year]:04d}"
+
+    n_tasks = n_sched = 0
+    impacts = []
+    for x in A:
+        status = STATUS.get(x["code"], ("in_service", None))[0]
+        if status in ("draft", "retired"):
+            continue
+        cls_cal = x["cls"] in ("CHAMBER", "FRIDGE", "LABINST", "BALANCE", "LOGGER", "PGAUGE", "DPGAUGE", "THERMO", "SENSOR",
+                               "TRANSMIT", "TORQUE", "REFSTD", "WEIGHTS")
+        if not (cls_cal or x["extra"].get("cal")):
+            continue
+        aid = ids[x["code"]]
+        if x["parent"] and x["cls"] == "LABINST":
+            continue   # HPLC modules are calibrated with their system
+        value, unit, performer, vcode = _plan(x)
+        tcode = _template_for(x)
+        tpl = templates.get(tcode) if tcode else None
+        sch = {"kind": "calibration", "interval_value": value, "interval_unit": unit, "basis": "floating",
+               "tol_before_value": None, "tol_before_unit": None, "tol_after_value": None, "tol_after_unit": None}
+        idays = work.interval_days(value, unit)
+        # spread the next due dates across the coming interval; a few are overdue or due this week on purpose
+        if x["code"] in SPECIAL_DUE:
+            next_due = today + dt.timedelta(days=SPECIAL_DUE[x["code"]])
+        else:
+            next_due = today + dt.timedelta(days=int(14 + _h(x["code"]) * (idays - 20)))
+        last_done = _back(next_due, value, unit)
+        s_id = tx.val(
+            "INSERT INTO schedules (tenant_id, site_id, asset_id, kind, template_id, interval_value, interval_unit, basis,"
+            " performer, vendor_id, assignee_roles, certificate_required, last_done, next_due)"
+            " VALUES (%s, %s, %s, 'calibration', %s, %s, %s, 'floating', %s, %s, %s::text[], %s, %s, %s) RETURNING id",
+            tid, sid, aid, tpl["id"] if tpl else None, value, unit, performer, vendors.get(vcode) if vcode else None,
+            [] if performer == "external" else ["qa_calibration_officer"], performer == "external", last_done, next_due)
+        n_sched += 1
+        # history: completed calibrations going back about two years
+        done_dates = []
+        d = last_done
+        while d > today - dt.timedelta(days=760) and len(done_dates) < 4:
+            done_dates.append(d)
+            d = _back(d, value, unit)
+        for k, performed in enumerate(reversed(done_dates)):
+            due = performed + dt.timedelta(days=int((_h(x["code"] + str(k)) - 0.6) * 8))
+            start, end = work.window(due, sch, settings)
+            latest = k == len(done_dates) - 1
+            verdict = "pass"
+            if latest and x["code"] == "PH-01":
+                verdict = "fail"
+            if latest and x["code"] == "SC-02-RH":
+                verdict = "adjusted"
+            vname = next((v[1] for v in VENDORS if v[0] == vcode), None) if vcode else None
+            t = tx.one(
+                "INSERT INTO tasks (tenant_id, site_id, asset_id, schedule_id, kind, number, template_id, due_date, window_start,"
+                " window_end, status, performer, vendor_id, assignee_roles, certificate_required, accepted_at, accepted_by_name,"
+                " performed_date, performed_by_name, certificate_no, env_temperature, env_humidity, verdict, completed_at,"
+                " completed_by_name, reviewed_at, reviewed_by_name, source)"
+                " VALUES (%s, %s, %s, %s, 'calibration', %s, %s, %s, %s, %s, 'completed', %s, %s, %s::text[], %s, %s, %s, %s, %s,"
+                " %s, %s, %s, %s, %s, %s, %s, %s, 'demo') RETURNING id",
+                tid, sid, aid, s_id, number(due.year), tpl["id"] if tpl else None, due, start, end, performer,
+                vendors.get(vcode) if vcode else None, [] if performer == "external" else ["qa_calibration_officer"],
+                performer == "external", dt.datetime.combine(performed, dt.time(8, 30)), "Calibration officer (demo)",
+                performed, f"{vname} technician (demo)" if vname else "Calibration officer (demo)",
+                f"{vcode}-{performed.year}-{int(_h(x['code'] + str(k)) * 9000) + 1000}" if vcode else None,
+                f"{21 + _h(x['code'] + 't' + str(k)) * 2:.1f} °C", f"{42 + int(_h(x['code'] + 'h' + str(k)) * 12)} %RH",
+                verdict, dt.datetime.combine(performed, dt.time(14, 0)), "Calibration officer (demo)",
+                dt.datetime.combine(performed + dt.timedelta(days=1), dt.time(10, 0)) if not latest or verdict == "pass" else None,
+                "QA approver (demo)" if not latest or verdict == "pass" else None)
+            n_tasks += 1
+            if tpl:
+                for it in tpl["items"]:
+                    half = (it["high"] - it["low"]) / 2
+                    drift = decimal_(0.08 + 0.12 * k + (_h(x["code"] + str(it["seq"])) - 0.5) * 0.3)
+                    found = decimal_(it["nominal"]) + half * drift
+                    left = None
+                    if verdict in ("fail", "adjusted") and it["seq"] == 2:
+                        found = found + half * decimal_(1.6)
+                        left = (decimal_(it["nominal"]) + half * decimal_(0.1)) if verdict == "adjusted" else found
+                    tx.x("INSERT INTO task_results (tenant_id, task_id, item_id, seq, item_type, parameter, nominal, unit,"
+                         " low_limit, high_limit, as_found, as_left, uncertainty, ok_found, ok_left)"
+                         " VALUES (%s, %s, %s, %s, 'point', %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
+                         tid, t["id"], it["id"], it["seq"], it["parameter"], it["nominal"], it["unit"], it["low"], it["high"],
+                         round(found, 6), round(left, 6) if left is not None else None, round(half / 5, 6),
+                         it["low"] <= found <= it["high"], (it["low"] <= left <= it["high"]) if left is not None else None)
+                std = std_for.get(x["rng"][2] if x["rng"] else "", None) if performer == "internal" else None
+                if std and std in ids:
+                    tx.x("INSERT INTO task_standards (tenant_id, task_id, standard_asset_id, description, cert_ref, valid_until)"
+                         " VALUES (%s, %s, %s, %s, %s, %s)", tid, t["id"], ids[std], std,
+                         f"NCS-{performed.year}-{int(_h(std) * 900) + 100}", performed + dt.timedelta(days=200))
+            if verdict in ("fail", "adjusted"):
+                impacts.append((x, aid, t["id"], verdict, performed, done_dates[1] if len(done_dates) > 1 else None))
+        # the open task for the next due date
+        start, end = work.window(next_due, sch, settings)
+        at_vendor = STATUS.get(x["code"], ("", ""))[0] == "out_for_calibration"
+        tx.x("INSERT INTO tasks (tenant_id, site_id, asset_id, schedule_id, kind, number, template_id, due_date, window_start,"
+             " window_end, status, performer, vendor_id, assignee_roles, certificate_required, sent_at, source)"
+             " VALUES (%s, %s, %s, %s, 'calibration', %s, %s, %s, %s, %s, %s, %s, %s, %s::text[], %s, %s, 'demo')",
+             tid, sid, aid, s_id, number(next_due.year), tpl["id"] if tpl else None, next_due, start, end,
+             "at_vendor" if at_vendor else "open", performer, vendors.get(vcode) if vcode else None,
+             [] if performer == "external" else ["qa_calibration_officer"], performer == "external",
+             dt.datetime.combine(today - dt.timedelta(days=4), dt.time(9, 0)) if at_vendor else None)
+        n_tasks += 1
+    for year, n in counters.items():
+        tx.x("INSERT INTO counters (tenant_id, key, value) VALUES (%s, %s, %s)"
+             " ON CONFLICT (tenant_id, key) DO UPDATE SET value = greatest(counters.value, EXCLUDED.value)", tid, f"CAL-{year}", n)
+    for k, (x, aid, task_id, verdict, performed, prev) in enumerate(impacts, start=1):
+        num = f"IA-{performed.year}-{k:03d}"
+        approved = verdict == "adjusted"
+        tx.x("INSERT INTO impact_assessments (tenant_id, site_id, asset_id, task_id, number, period_from, period_to, status, summary,"
+             " scope, products, risk, actions, conclusion, approved_at, approved_by_name, source)"
+             " VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'demo')",
+             tid, sid, aid, task_id, num, prev, performed, "approved" if approved else "draft",
+             f"{x['code']} ({x['en']}) was found out of tolerance at the second calibration point during {num.replace('IA', 'calibration')}.",
+             "Stability chamber SC-02 humidity control and the samples stored in it." if approved else
+             "Wet chemistry lab R-202: pH measurements of raw materials, in-process and finished product tests.",
+             "Stability samples stored at 40 °C / 75 % RH during the period; RH stayed within ±5 % per the independent data logger."
+             if approved else "pH results reported with PH-01 since the last good calibration (QC LIMS query to be attached).",
+             "low" if approved else "medium",
+             "1. Compare with independent logger LOG-01.\n2. Confirm no excursion beyond ±5 % RH.\n3. Re-calibrate sensor (done)."
+             if approved else "1. Keep PH-01 in quarantine.\n2. Retest retained samples with a qualified meter.\n3. Replace electrode and re-calibrate.",
+             "No impact on stability data: the sensor drift stayed inside the protocol limits." if approved else None,
+             dt.datetime.combine(performed + dt.timedelta(days=3), dt.time(11, 0)) if approved else None,
+             "QA approver (demo)" if approved else None)
+    tx.x("INSERT INTO counters (tenant_id, key, value) SELECT %s, 'IA-' || to_char(now(), 'YYYY'), %s"
+         " ON CONFLICT (tenant_id, key) DO UPDATE SET value = greatest(counters.value, EXCLUDED.value)", tid, len(impacts))
+    return {"schedules": n_sched, "tasks": n_tasks, "templates": len(TEMPLATES), "impact_assessments": len(impacts)}
+
+
+def _back(d: dt.date, value: int, unit: str) -> dt.date:
+    return work._sub_months(d, value * (12 if unit == "year" else 1)) if unit in ("month", "year") else \
+        d - dt.timedelta(days=value * (7 if unit == "week" else 1))
+
+
+import decimal as _decimal  # noqa: E402
+
+
+def decimal_(v) -> _decimal.Decimal:
+    return v if isinstance(v, _decimal.Decimal) else _decimal.Decimal(str(v))

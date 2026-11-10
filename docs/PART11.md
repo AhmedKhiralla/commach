@@ -29,6 +29,21 @@ raw answer. It becomes data only when a person saves the record. At that point C
 values, and **every field the person corrected** (AI value → final value). The record shows "proposed by
 &lt;model&gt; for &lt;user&gt;, accepted by &lt;user&gt;". The person who saves remains responsible for the content.
 
+### Calibration records (Phase 2)
+
+- A completed calibration, an approved template and an approved impact assessment can no longer be changed:
+  database triggers refuse updates to them and to their readings and standards. The only later change is the one-time review signature.
+- A task can be completed only with a signature (`calibration_completed`). The hash covers the record fields,
+  every reading, the standards used and the verdict.
+- The verdict (pass / adjusted / fail) is computed from the limits, not typed. A failed calibration changes the asset
+  to quarantined under the same signature.
+- Review is by a second person (`calibration_reviewed`); the person who completed the calibration cannot review it.
+- Schedule changes need a reason for change, which is stored with the audit entry.
+- Certificate AI and impact-assessment AI follow the AI rules below: the AI value and the final value of every field
+  are recorded when the person signs or saves.
+
+Evidence: `tests/test_calibration.py`.
+
 ## Subpart C — Electronic signatures
 
 | Clause | Requirement | How ComMach meets it | Evidence |

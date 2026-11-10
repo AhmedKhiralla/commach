@@ -1,7 +1,7 @@
 """Asset labels with a QR code. Scanning the code opens the asset on a phone or tablet (after sign-in).
 
 Two layouts: a sheet of labels on A4 (cut out or use label stock) and one label per page for label printers.
-Phase 2 adds the calibration and PM dates; the blank lines let a site use the label by hand meanwhile.
+Calibration labels print the last calibration date, the next due date and who did and checked it; blank lines remain where a value is not known yet.
 """
 from __future__ import annotations
 
@@ -99,17 +99,25 @@ def _draw(c, x: float, y: float, w: float, h: float, a: dict, url: str, company:
     c.setFillColorRGB(1, 1, 1)
     c.setFont(bold, 7.5)
     c.drawCentredString(x + w / 2, y + pad + 1.8 * mm, STATUS_TEXT.get(a["status"], a["status"].upper()))
-    # hand-written lines for calibration until Phase 2 prints the dates
+    # calibration dates (or blank lines to fill by hand)
     if h >= 45 * mm and a.get("calibration_required"):
         c.setFillColorRGB(0.2, 0.2, 0.2)
         c.setFont(reg, 6.5)
-        lines = ("Calibrated on:", "Calibration due:", "Done by:", "Checked by:")
+        fmt = (lambda d: d.strftime("%d %b %Y") if d else "")
+        lines = (("Calibrated on:", fmt(a.get("cal_last"))), ("Calibration due:", fmt(a.get("cal_due"))),
+                 ("Done by:", a.get("cal_by") or ""), ("Checked by:", a.get("cal_checked") or ""))
         yy = y + pad + band_h + 3 * mm
-        for i, t in enumerate(reversed(lines)):
+        for i, (t, val) in enumerate(reversed(lines)):
             ly = yy + i * 4.2 * mm
+            c.setFont(reg, 6.5)
             c.drawString(tx, ly, t)
-            c.setLineWidth(0.3)
-            c.line(tx + 22 * mm, ly - 0.6, x + w - 3 * pad - q if ly > y + h - pad - q else x + w - pad, ly - 0.6)
+            end = x + w - 3 * pad - q if ly > y + h - pad - q else x + w - pad
+            if val:
+                c.setFont(bold, 7)
+                c.drawString(tx + 22 * mm, ly, _fit(c, val, bold, 7, end - tx - 22 * mm))
+            else:
+                c.setLineWidth(0.3)
+                c.line(tx + 22 * mm, ly - 0.6, end, ly - 0.6)
 
 
 @endpoint(auth="tenant_user")
@@ -124,7 +132,15 @@ def labels_pdf(call: Call):
     layout = call.query.get("layout", "a4")
     rows = call.tx.q(
         "SELECT a.id, a.site_id, a.code, a.name_en, a.serial_no, a.status, a.calibration_required,"
-        " c.name_en AS class_name_en, s.code AS site_code, l.code AS location_code"
+        " c.name_en AS class_name_en, s.code AS site_code, l.code AS location_code,"
+        " (SELECT t.performed_date FROM tasks t WHERE t.asset_id = a.id AND t.kind = 'calibration' AND t.status = 'completed'"
+        "   ORDER BY t.performed_date DESC LIMIT 1) AS cal_last,"
+        " (SELECT t.completed_by_name FROM tasks t WHERE t.asset_id = a.id AND t.kind = 'calibration' AND t.status = 'completed'"
+        "   ORDER BY t.performed_date DESC LIMIT 1) AS cal_by,"
+        " (SELECT t.reviewed_by_name FROM tasks t WHERE t.asset_id = a.id AND t.kind = 'calibration' AND t.status = 'completed'"
+        "   ORDER BY t.performed_date DESC LIMIT 1) AS cal_checked,"
+        " (SELECT min(t.due_date) FROM tasks t WHERE t.asset_id = a.id AND t.kind = 'calibration'"
+        "   AND t.status NOT IN ('completed', 'cancelled')) AS cal_due"
         " FROM assets a JOIN asset_classes c ON c.id = a.class_id JOIN sites s ON s.id = a.site_id"
         " LEFT JOIN locations l ON l.id = a.location_id WHERE a.id = ANY(%s::uuid[]) ORDER BY a.code", ids)
     for r in rows:

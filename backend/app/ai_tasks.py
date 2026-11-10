@@ -3,6 +3,8 @@ input and of the raw answer) and becomes data only when a person accepts it, wit
 
   nameplate       photo of an equipment nameplate -> manufacturer, model, serial, ranges, class, name
   import_mapping  headers and sample rows of a customer's own register -> ComMach columns and value mappings
+  certificate     calibration certificate -> readings mapped to the task's points, plus validation checks
+  impact          out-of-tolerance result -> first draft of the impact assessment for QA
 """
 from __future__ import annotations
 
@@ -242,3 +244,246 @@ def run_import_mapping(call: Call, headers: list[str], rows: list[list], targets
 
 def slug(s: str) -> str:
     return re.sub(r"[^a-z0-9]+", "_", (s or "").lower()).strip("_")
+
+
+# ------------------------------------------------------------------ calibration certificate
+PROMPTS["certificate"] = "certificate-v1"
+PROMPTS["impact"] = "impact-v1"
+
+CERT_PROMPT = """You read calibration certificates (English or Arabic) for a GMP calibration system.
+Read only what is printed on the certificate pages. Never guess; use null for anything not printed.
+Numbers: give plain numbers with a dot as decimal separator (convert Arabic-Indic digits and commas).
+Dates: YYYY-MM-DD.
+
+The instrument we expect: {expected}
+
+Return JSON:
+{{"certificate_no": "...", "lab_name": "...", "accreditation_body": "...", "accreditation_no": "...",
+  "calibration_date": "YYYY-MM-DD", "next_due_date": "YYYY-MM-DD or null", "issue_date": "YYYY-MM-DD or null",
+  "instrument": {{"description": "...", "manufacturer": "...", "model": "...", "serial_no": "...", "id": "..."}},
+  "environment": {{"temperature": "e.g. 21.3 °C", "humidity": "e.g. 45 %RH"}},
+  "standards": [{{"description": "...", "id": "...", "certificate_no": "...", "due_date": "YYYY-MM-DD or null"}}],
+  "readings": [{{"parameter": "...", "nominal": number, "unit": "...", "as_found": number or null,
+                 "as_left": number or null, "error": number or null, "uncertainty": number or null,
+                 "tolerance": "as printed or null"}}],
+  "conformity": "the statement of conformity as printed, or null",
+  "technician": "name of the person who calibrated, or null",
+  "notes": "anything the reviewer should check (unreadable cells, stamps over text, missing pages)"}}
+If the certificate gives only one reading per point (no adjustment), put it in as_found and leave as_left null.
+If it gives a reading "before adjustment" and "after adjustment", those are as_found and as_left."""
+
+
+def _num(v):
+    if v is None or v == "":
+        return None
+    try:
+        return float(str(v).replace(",", ".").replace("٫", ".").strip())
+    except ValueError:
+        return None
+
+
+def _date(v):
+    import datetime as _dt
+    try:
+        return _dt.date.fromisoformat(str(v)[:10]) if v else None
+    except ValueError:
+        return None
+
+
+def _norm_id(v) -> str:
+    return re.sub(r"[^a-z0-9]", "", str(v or "").lower())
+
+
+def certificate_images(f: dict, data: bytes) -> list:
+    from PIL import Image, ImageOps
+    if f["mime"] == "application/pdf":
+        import pypdfium2 as pdfium
+        pdf = pdfium.PdfDocument(io.BytesIO(data))
+        out = []
+        for i in range(min(len(pdf), 3)):
+            img = pdf[i].render(scale=2).to_pil().convert("RGB")
+            img.thumbnail((1700, 2200))
+            out.append(img)
+        return out
+    img = ImageOps.exif_transpose(Image.open(io.BytesIO(data))).convert("RGB")
+    img.thumbnail((1800, 2400))
+    return [img]
+
+
+def run_certificate(call: Call, task: dict, f: dict, data: bytes) -> dict:
+    """Read a certificate, map its readings to the task's points and check it. Nothing is saved to the task."""
+    from . import work
+    p = provider_for(call, "ai_certificate")
+    a = task["asset"]
+    expected = (f"{a['code']} {a['name_en']}; manufacturer {a.get('manufacturer') or '?'}; model {a.get('model') or '?'};"
+                f" serial {a.get('serial_no') or '?'}; points: " +
+                ", ".join(f"{r['parameter']} {r['nominal']} {r['unit'] or ''}" for r in task["results"] if r["item_type"] == "point"))
+    try:
+        imgs = certificate_images(f, data)
+    except Exception:
+        raise ApiError(422, "bad_file", "This certificate could not be opened.")
+    content = [{"type": "text", "text": CERT_PROMPT.format(expected=expected[:1500])}]
+    content += [{"type": "image_url", "image_url": {"url": ai.img_data_url(i)}} for i in imgs]
+    try:
+        out = ai.chat(p, p.vision_model, [{"role": "user", "content": content}], max_tokens=3500, timeout=150)
+    except ai.AIUnavailable as e:
+        raise ApiError(502, "ai_failed", f"The AI could not read the certificate: {e}")
+    record_usage(call, out.get("usage"))
+    x = out["data"] if isinstance(out["data"], dict) else {}
+    readings = [r for r in (x.get("readings") or []) if isinstance(r, dict)]
+    for r in readings:
+        for k in ("nominal", "as_found", "as_left", "error", "uncertainty"):
+            r[k] = _num(r.get(k))
+    # map readings to the task's points by nominal value (then by parameter name)
+    mapped, used = [], set()
+    for row in task["results"]:
+        if row["item_type"] != "point":
+            continue
+        nominal = float(row["nominal"]) if row["nominal"] is not None else None
+        best = None
+        for i, r in enumerate(readings):
+            if i in used or r["nominal"] is None or nominal is None:
+                continue
+            if abs(r["nominal"] - nominal) <= max(1e-9, abs(nominal) * 0.005):
+                if best is None or (row["parameter"].lower()[:4] in str(r.get("parameter", "")).lower()):
+                    best = i
+        if best is not None:
+            used.add(best)
+            r = readings[best]
+            mapped.append({"seq": row["seq"], "as_found": r["as_found"] if r["as_found"] is not None else
+                           (nominal + r["error"] if r["error"] is not None else None),
+                           "as_left": r["as_left"], "uncertainty": r["uncertainty"]})
+        else:
+            mapped.append({"seq": row["seq"], "as_found": None, "as_left": None, "uncertainty": None, "missing": True})
+    extra = [r for i, r in enumerate(readings) if i not in used]
+    st = work.effective_settings(call.tx.val("SELECT work_settings FROM tenants WHERE id = %s", call.tenant_id))
+    checks = certificate_checks(call, task, x, mapped, extra, st)
+    fields = {"certificate_no": x.get("certificate_no"), "performed_date": x.get("calibration_date"),
+              "env_temperature": (x.get("environment") or {}).get("temperature"),
+              "env_humidity": (x.get("environment") or {}).get("humidity")}
+    for m in mapped:
+        for k in ("as_found", "as_left", "uncertainty"):
+            fields[f"p{m['seq']}.{k}"] = m.get(k)
+    result = {"fields": fields, "extracted": x, "mapped": mapped, "extra_readings": extra, "checks": checks}
+    s = store_suggestion(call, "certificate", p, out["model"], result, file_id=str(f["id"]), input_sha=f["sha256"])
+    return {"suggestion": s, **result}
+
+
+def certificate_checks(call: Call, task: dict, x: dict, mapped: list, extra: list, st: dict) -> list[dict]:
+    from . import work
+    checks = []
+
+    def add(key, status, **vals):
+        checks.append({"key": key, "status": status, "values": vals})
+
+    a = task["asset"]
+    cert_sn, our_sn = _norm_id((x.get("instrument") or {}).get("serial_no")), _norm_id(a.get("serial_no"))
+    if cert_sn and our_sn:
+        add("serial", "ok" if cert_sn == our_sn else "fail", certificate=(x.get("instrument") or {}).get("serial_no"),
+            register=a.get("serial_no"))
+    else:
+        add("serial", "warn", certificate=(x.get("instrument") or {}).get("serial_no"), register=a.get("serial_no"))
+    cdate = _date(x.get("calibration_date"))
+    import datetime as _dt
+    today_ = _dt.date.today()
+    if not cdate:
+        add("date", "fail", date=None)
+    elif cdate > today_:
+        add("date", "fail", date=str(cdate))
+    elif task["window_end"] and cdate > task["window_end"]:
+        add("date", "warn", date=str(cdate), window_end=str(task["window_end"]))
+    else:
+        add("date", "ok", date=str(cdate))
+    missing = [m["seq"] for m in mapped if m.get("missing")]
+    if not mapped:
+        # no template points: the certificate's own readings become the points, to be checked by the user
+        add("coverage", "warn", found=0, expected=0, missing=[], extra=len(extra), no_points=True)
+    else:
+        add("coverage", "ok" if not missing else "fail", found=len(mapped) - len(missing), expected=len(mapped),
+            missing=missing, extra=len(extra))
+    # tolerance per point and uncertainty ratio
+    oot, low_ratio = [], []
+    rows = {r["seq"]: r for r in task["results"]}
+    for m in mapped:
+        r = rows[m["seq"]]
+        lo = float(r["low_limit"]) if r["low_limit"] is not None else None
+        hi = float(r["high_limit"]) if r["high_limit"] is not None else None
+        if m["as_found"] is not None and not work.within(m["as_found"], work.D(lo), work.D(hi)):
+            oot.append(m["seq"])
+        if m.get("uncertainty") and lo is not None and hi is not None:
+            ratio = ((hi - lo) / 2) / m["uncertainty"] if m["uncertainty"] else None
+            if ratio is not None and ratio < float(st["uncertainty_ratio_min"]):
+                low_ratio.append({"seq": m["seq"], "ratio": round(ratio, 2)})
+    add("tolerance", "ok" if not oot else "fail", out=oot)
+    add("uncertainty", "ok" if not low_ratio else "warn", low=low_ratio, minimum=st["uncertainty_ratio_min"])
+    conf = str(x.get("conformity") or "").lower()
+    if conf:
+        lab_pass = any(w in conf for w in ("pass", "conform", "within", "complies", "مطابق", "ضمن"))
+        lab_fail = any(w in conf for w in ("fail", "not conform", "out of", "does not", "غير مطابق"))
+        agree = (lab_pass and not oot) or (lab_fail and oot) or not (lab_pass or lab_fail)
+        add("conformity", "ok" if agree else "warn", statement=x.get("conformity"))
+    if task.get("vendor_id"):
+        v = call.tx.one("SELECT name, accreditation_no, accreditation_expiry FROM vendors WHERE id = %s", task["vendor_id"])
+        cert_acc = _norm_id(x.get("accreditation_no"))
+        if v and v["accreditation_no"] and cert_acc and _norm_id(v["accreditation_no"]) not in cert_acc and cert_acc not in _norm_id(v["accreditation_no"]):
+            add("accreditation", "warn", certificate=x.get("accreditation_no"), register=v["accreditation_no"])
+        elif v and v["accreditation_expiry"] and cdate and v["accreditation_expiry"] < cdate:
+            add("accreditation", "fail", expired=str(v["accreditation_expiry"]))
+        else:
+            add("accreditation", "ok" if v and v["accreditation_no"] else "warn", register=v["accreditation_no"] if v else None)
+    stds = [s for s in (x.get("standards") or []) if isinstance(s, dict)]
+    bad_std = [s.get("id") or s.get("description") for s in stds if _date(s.get("due_date")) and cdate and _date(s.get("due_date")) < cdate]
+    add("standards", "warn" if not stds else ("fail" if bad_std else "ok"), count=len(stds), expired=bad_std)
+    return checks
+
+
+# ------------------------------------------------------------------ impact assessment draft
+IMPACT_PROMPT = """You are a pharmaceutical QA specialist writing the first draft of an impact assessment for an
+out-of-tolerance (OOT) calibration result, for a QA approver to review and complete. Be factual and specific to the
+data below. Do not invent batch numbers, product names or test results that are not given: where they are needed,
+say exactly which records QA must pull (for example "batches processed on line L-TAB1 between 2026-03-04 and 2026-09-02").
+
+Instrument and result:
+{context}
+
+Return JSON:
+{{"summary": "what was found, in 2-4 sentences",
+  "scope": "which rooms, lines, equipment, processes or tests relied on this instrument during the period",
+  "products": "which products, batches or test results may be affected and which records to review",
+  "risk": "low" | "medium" | "high",
+  "risk_reason": "one or two sentences why",
+  "actions": "numbered list of actions (containment, record review, recalculation, CAPA, re-qualification)",
+  "conclusion": "a draft conclusion that QA must confirm after the review"}}"""
+
+
+def run_impact(call: Call, i: dict) -> dict:
+    p = provider_for(call, "ai_impact")
+    a = i["asset"]
+    pts = "; ".join(
+        f"{r['parameter']} nominal {r['nominal']} {r['unit'] or ''}: limits {r['low_limit']}..{r['high_limit']}, as found "
+        f"{r['as_found']}{' (OUT)' if r['ok_found'] is False else ''}, as left {r['as_left'] if r['as_left'] is not None else '-'}"
+        for r in i["results"])
+    children = call.tx.q("SELECT code, name_en FROM assets WHERE parent_id = %s", a["id"])
+    users = call.tx.q("SELECT p.code, p.name_en FROM assets p WHERE p.id = (SELECT parent_id FROM assets WHERE id = %s)", a["id"])
+    context = (f"Asset {a['code']} – {a['name_en']} (GMP criticality {a['gmp_criticality']}); location {a['location_code'] or '-'} "
+               f"{a['location_name_en'] or ''}; line {a['line_code'] or '-'} {a['line_name_en'] or ''}; part of "
+               f"{(users[0]['code'] + ' ' + users[0]['name_en']) if users else 'none'}; components "
+               f"{', '.join(c['code'] for c in children) or 'none'}.\nCalibration {i['task_number']} on {i['performed_date']}: "
+               f"verdict {i['verdict']} (adjusted = out of tolerance as found, corrected as left; fail = still out of tolerance).\n"
+               f"Readings: {pts}\nPeriod at risk: from the last calibration in tolerance ({i['period_from'] or 'unknown'}) "
+               f"to {i['period_to']}.")
+    try:
+        out = ai.chat(p, p.text_model, [{"role": "user", "content": IMPACT_PROMPT.format(context=context)}],
+                      max_tokens=2500, timeout=120)
+    except ai.AIUnavailable as e:
+        raise ApiError(502, "ai_failed", f"The AI could not draft the assessment: {e}")
+    record_usage(call, out.get("usage"))
+    d = out["data"] if isinstance(out["data"], dict) else {}
+    fields = {k: str(d.get(k) or "").strip()[:8000] for k in ("summary", "scope", "products", "actions", "conclusion")}
+    if isinstance(d.get("actions"), list):
+        fields["actions"] = "\n".join(f"{n}. {x}" for n, x in enumerate(d["actions"], 1))
+    risk = d.get("risk") if d.get("risk") in ("low", "medium", "high") else None
+    fields["risk"] = risk
+    result = {"fields": fields, "risk_reason": str(d.get("risk_reason") or "")[:1000]}
+    s = store_suggestion(call, "impact", p, out["model"], result, input_sha=hashlib.sha256(context.encode()).hexdigest())
+    return {"suggestion": s, **result}

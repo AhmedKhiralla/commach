@@ -10,12 +10,11 @@ from starlette.applications import Starlette
 from starlette.middleware import Middleware
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import FileResponse, JSONResponse, PlainTextResponse
-from starlette.routing import Mount, Route
-from starlette.staticfiles import StaticFiles
+from starlette.routing import Route
 
 from .config import settings
 from .routers import (ai_routes, assets, audit_trail, auth, company, excel, files, hierarchy, integration, labels, lists,
-                      platform, sample)
+                      platform, sample, work)
 
 logging.basicConfig(level=os.environ.get("LOG_LEVEL", "INFO"),
                     format="%(asctime)s %(levelname)s %(name)s %(message)s")
@@ -40,6 +39,7 @@ API_ROUTES = [
     Route("/api/sites", company.list_sites, methods=["GET"]),
     Route("/api/sites", company.create_site, methods=["POST"]),
     Route("/api/sites/{site_id}", company.update_site, methods=["PATCH"]),
+    Route("/api/people", company.list_people, methods=["GET"]),
     Route("/api/users", company.list_users, methods=["GET"]),
     Route("/api/users", company.create_user, methods=["POST"]),
     Route("/api/users/{user_id}", company.update_user, methods=["PATCH"]),
@@ -93,6 +93,34 @@ API_ROUTES = [
     Route("/api/assets/{asset_id}", assets.update_asset, methods=["PATCH"]),
     Route("/api/assets/{asset_id}/files", assets.add_file, methods=["POST"]),
     Route("/api/asset-files/{link_id}/remove", assets.remove_file, methods=["POST"]),
+    # Calibration and maintenance work
+    Route("/api/settings/work", work.get_work_settings, methods=["GET"]),
+    Route("/api/settings/work", work.update_work_settings, methods=["PUT"]),
+    Route("/api/templates", work.list_templates, methods=["GET"]),
+    Route("/api/templates", work.create_template, methods=["POST"]),
+    Route("/api/templates/{template_id}", work.get_template, methods=["GET"]),
+    Route("/api/templates/{template_id}", work.update_template, methods=["PATCH"]),
+    Route("/api/templates/{template_id}/approve", work.approve_template, methods=["POST"]),
+    Route("/api/templates/{template_id}/new-version", work.new_version, methods=["POST"]),
+    Route("/api/schedules", work.create_schedules, methods=["POST"]),
+    Route("/api/schedules/preview", work.preview_schedule, methods=["POST"]),
+    Route("/api/schedules/{schedule_id}", work.update_schedule, methods=["PATCH"]),
+    Route("/api/schedules/{schedule_id}/end", work.end_schedule, methods=["POST"]),
+    Route("/api/assets/{asset_id}/work", work.asset_work, methods=["GET"]),
+    Route("/api/tasks", work.list_tasks, methods=["GET"]),
+    Route("/api/tasks/{task_id}", work.get_task, methods=["GET"]),
+    Route("/api/tasks/{task_id}/accept", work.accept_task, methods=["POST"]),
+    Route("/api/tasks/{task_id}/send", work.send_to_vendor, methods=["POST"]),
+    Route("/api/tasks/{task_id}/results", work.put_results, methods=["PUT"]),
+    Route("/api/tasks/{task_id}/complete", work.complete_task, methods=["POST"]),
+    Route("/api/tasks/{task_id}/review", work.review_task, methods=["POST"]),
+    Route("/api/tasks/{task_id}/cancel", work.cancel_task, methods=["POST"]),
+    Route("/api/tasks/{task_id}/certificate", ai_routes.certificate, methods=["POST"]),
+    Route("/api/impacts", work.list_impacts, methods=["GET"]),
+    Route("/api/impacts/{impact_id}", work.get_impact, methods=["GET"]),
+    Route("/api/impacts/{impact_id}", work.update_impact, methods=["PATCH"]),
+    Route("/api/impacts/{impact_id}/approve", work.approve_impact, methods=["POST"]),
+    Route("/api/impacts/{impact_id}/ai-draft", ai_routes.impact_draft, methods=["POST"]),
     # AI
     Route("/api/ai/nameplate", ai_routes.nameplate, methods=["POST"]),
     Route("/api/ai/suggestions/{suggestion_id}/reject", ai_routes.reject, methods=["POST"]),
@@ -143,11 +171,9 @@ def _frontend_routes() -> list:
             return FileResponse(candidate)
         return FileResponse(index, headers={"Cache-Control": "no-cache"})
 
-    routes = []
-    if (dist / "assets").exists():
-        routes.append(Mount("/assets", StaticFiles(directory=dist / "assets"), name="assets"))
-    routes.append(Route("/{path:path}", spa))
-    return routes
+    # No static mount on /assets: the build's /assets/app.js shares that prefix with the app's own /assets/{id}
+    # pages, which must fall through to index.html when opened directly or refreshed.
+    return [Route("/{path:path}", spa)]
 
 
 @asynccontextmanager

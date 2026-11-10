@@ -29,6 +29,13 @@ STATEMENTS = {
     "retired": "I retire this asset: it is permanently withdrawn from GMP use.",
     "disposed": "I confirm this asset has been disposed of.",
     "transferred": "I confirm this asset has been transferred out of this site.",
+    # calibration and maintenance work
+    "template_approved": "I approve this template: its points, tolerances and method are correct for use.",
+    "sent_to_vendor": "I confirm this asset has left for external calibration and must not be used until it returns.",
+    "calibration_completed": "I confirm this calibration was performed as recorded and the results are true and complete.",
+    "calibration_reviewed": "I have reviewed this calibration record and agree with its results and verdict.",
+    "task_cancelled": "I cancel this task for the reason given.",
+    "impact_approved": "I approve this impact assessment and its conclusion.",
 }
 
 

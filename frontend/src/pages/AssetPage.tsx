@@ -10,9 +10,10 @@ import { Link, navigate } from "../lib/router";
 import type { StringKey } from "../lib/strings";
 import { nameOf, type Asset, type AssetFile } from "../lib/types";
 import { AssetForm } from "./AssetForm";
+import { AssetCalibration } from "./AssetWork";
 
 const FILE_KINDS = ["photo", "nameplate", "manual", "certificate", "drawing", "other"] as const;
-type Tab = "details" | "components" | "files" | "history" | "ai";
+type Tab = "details" | "calibration" | "components" | "files" | "history" | "ai";
 
 function Fact({ label, children }: { label: string; children: ReactNode }) {
   return <div className="cm-fact"><dt>{label}</dt><dd>{children || <span className="subtle">—</span>}</dd></div>;
@@ -75,7 +76,7 @@ export function AssetPage({ assetId }: { assetId: string }) {
   const { t, lang, date, dateTime, qty } = useI18n();
   const toast = useToast();
   const { data: a, error, reload, setData } = useLoad(() => get<Asset>(`/api/assets/${assetId}`), [assetId]);
-  const [tab, setTab] = useState<Tab>("details");
+  const [tab, setTab] = useState<Tab>(() => (new URLSearchParams(window.location.search).get("tab") as Tab) || "details");
   const [editing, setEditing] = useState(false);
   const [adding, setAdding] = useState(false);
   const [signing, setSigning] = useState(false);
@@ -91,6 +92,7 @@ export function AssetPage({ assetId }: { assetId: string }) {
   const photo = a.photo_file_id ?? a.nameplate_file_id;
   const tabs: { key: Tab; label: string; n?: number }[] = [
     { key: "details", label: t("asset.tab.details") },
+    ...(a.calibration_required ? [{ key: "calibration" as Tab, label: t("asset.tab.calibration") }] : []),
     { key: "components", label: t("asset.tab.components"), n: a.children.length },
     { key: "files", label: t("asset.tab.files"), n: a.files.length },
     { key: "history", label: t("asset.tab.history"), n: a.history.length },
@@ -178,6 +180,8 @@ export function AssetPage({ assetId }: { assetId: string }) {
           </div>
         </div>
       )}
+
+      {tab === "calibration" && <AssetCalibration asset={a} onChanged={reload} />}
 
       {tab === "components" && (
         <section className="panel">

@@ -2,7 +2,7 @@ import { useEffect, useState, type ReactNode } from "react";
 import {
   LuBoxes, LuBuilding2, LuCalendarClock, LuChartLine, LuChevronDown, LuClipboardCheck, LuFileSpreadsheet, LuFileText,
   LuHouse, LuKeyRound, LuLanguages, LuListChecks, LuLogOut, LuMapPin, LuMenu, LuMonitor, LuMoon, LuNetwork, LuScrollText,
-  LuSearch, LuSettings, LuSun, LuTags, LuTruck, LuUsers, LuWrench, LuX,
+  LuSearch, LuSettings, LuShieldAlert, LuSun, LuTags, LuTruck, LuUsers, LuWrench, LuX,
 } from "react-icons/lu";
 import { useI18n } from "../lib/i18n";
 import { Link, navigate, usePath } from "../lib/router";
@@ -32,13 +32,17 @@ function groupsFor(isPlatform: boolean, isAdmin: boolean, canAudit: boolean): Na
       { to: "/import", label: "nav.import", icon: <LuFileSpreadsheet /> },
       { to: "/locations", label: "nav.locations", icon: <LuMapPin /> },
     ] },
+    { title: "nav.calibration", items: [
+      { to: "/calibration", label: "nav.calWork", icon: <LuClipboardCheck /> },
+      { to: "/calibration/templates", label: "nav.calTemplates", icon: <LuListChecks /> },
+      { to: "/calibration/impacts", label: "nav.impacts", icon: <LuShieldAlert /> },
+    ] },
     { title: "nav.lists", items: [
       { to: "/classes", label: "nav.classes", icon: <LuTags /> },
       { to: "/vendors", label: "nav.vendors", icon: <LuTruck /> },
       { to: "/departments", label: "nav.departments", icon: <LuNetwork /> },
     ] },
     { title: "nav.coming", items: [
-      { label: "nav.calibration", icon: <LuClipboardCheck />, phase: 2 },
       { label: "nav.maintenance", icon: <LuWrench />, phase: 3 },
       { label: "nav.tasks", icon: <LuCalendarClock />, phase: 4 },
       { label: "nav.forms", icon: <LuFileText />, phase: 5 },
@@ -71,6 +75,7 @@ function FindCode() {
 }
 
 function isCurrent(path: string, to: string) {
+  if (to === "/calibration" && /^\/calibration\/(templates|impacts)/.test(path)) return false;
   return to === "/" ? path === "/" : path === to || path.startsWith(to + "/");
 }
 

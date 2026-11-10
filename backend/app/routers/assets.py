@@ -163,7 +163,15 @@ SELECT a.id, a.site_id, a.code, a.name_en, a.name_ar, a.status, a.gmp_criticalit
        c.code AS class_code, c.name_en AS class_name_en, c.name_ar AS class_name_ar, c.category,
        l.code AS location_code, l.name_en AS location_name_en, l.name_ar AS location_name_ar, l.kind AS location_kind,
        p.code AS parent_code, s.code AS site_code, ln.code AS line_code, d.code AS department_code,
-       (SELECT count(*) FROM assets ch WHERE ch.parent_id = a.id) AS child_count
+       (SELECT count(*) FROM assets ch WHERE ch.parent_id = a.id) AS child_count,
+       (SELECT min(t.due_date) FROM tasks t WHERE t.asset_id = a.id AND t.kind = 'calibration'
+         AND t.status NOT IN ('completed', 'cancelled')) AS cal_due,
+       (SELECT bool_or(t.window_end < current_date) FROM tasks t WHERE t.asset_id = a.id AND t.kind = 'calibration'
+         AND t.status NOT IN ('completed', 'cancelled')) AS cal_overdue,
+       (SELECT min(t.due_date) FROM tasks t WHERE t.asset_id = a.id AND t.kind = 'pm'
+         AND t.status NOT IN ('completed', 'cancelled')) AS pm_due,
+       (SELECT max(t.performed_date) FROM tasks t WHERE t.asset_id = a.id AND t.kind = 'calibration'
+         AND t.status = 'completed') AS cal_last
   FROM assets a
   JOIN asset_classes c ON c.id = a.class_id
   JOIN sites s ON s.id = a.site_id
@@ -230,7 +238,8 @@ def list_assets(call: Call):
     except ValueError:
         raise ApiError(422, "invalid", "Page must be a number.")
     sort = {"code": "a.code", "name": "a.name_en", "status": "a.status, a.code", "class": "c.code, a.code",
-            "location": "l.code NULLS LAST, a.code", "updated": "a.updated_at DESC"}.get(call.query.get("sort", "code"), "a.code")
+            "location": "l.code NULLS LAST, a.code", "updated": "a.updated_at DESC",
+            "cal_due": "(SELECT min(t.due_date) FROM tasks t WHERE t.asset_id = a.id AND t.kind = 'calibration' AND t.status NOT IN ('completed', 'cancelled')) NULLS LAST, a.code"}.get(call.query.get("sort", "code"), "a.code")
     total = call.tx.val("SELECT count(*) FROM assets a JOIN asset_classes c ON c.id = a.class_id"
                         " JOIN sites s ON s.id = a.site_id LEFT JOIN locations l ON l.id = a.location_id" + where, *params)
     rows = call.tx.q(LIST_SQL + where + f" ORDER BY {sort} LIMIT %s OFFSET %s", *params, size, (page - 1) * size)
@@ -387,6 +396,17 @@ def signed_fields(a: dict) -> dict:
     return {k: a[k] for k in keep}
 
 
+def apply_status(call: Call, a: dict, status: str, reason: str, note: str | None, signature_id) -> None:
+    """Change an asset's status under a signature that was just recorded (caller sets app.status_change)."""
+    call.tx.x("SELECT set_config('app.status_change', 'signed', true)")
+    call.tx.x("UPDATE assets SET status = %s, status_note = %s WHERE id = %s", status, clean(note), a["id"])
+    call.tx.x("INSERT INTO asset_status_history (tenant_id, asset_id, from_status, to_status, reason, source,"
+              " signature_id, user_id, user_name) VALUES (%s, %s, %s, %s, %s, 'signature', %s, %s, %s)",
+              call.tenant_id, a["id"], a["status"], status, reason.strip(), signature_id, call.user["id"],
+              call.user["full_name"])
+    call.tx.x("SELECT set_config('app.status_change', '', true)")
+
+
 @endpoint(auth="tenant_user", body=StatusIn)
 def change_status(call: Call):
     b: StatusIn = call.body
@@ -418,11 +438,7 @@ def change_status(call: Call):
                                    "note": (b.note or "").strip()})
         sig = esign.record(call, signer=signer, entity="asset", record_id=str(a["id"]), label=a["code"],
                            meaning=meaning, rhash=rhash, reason=b.reason)
-        call.tx.x("UPDATE assets SET status = %s, status_note = %s WHERE id = %s", b.status, clean(b.note), a["id"])
-        call.tx.x("INSERT INTO asset_status_history (tenant_id, asset_id, from_status, to_status, reason, source,"
-                  " signature_id, user_id, user_name) VALUES (%s, %s, %s, %s, %s, 'signature', %s, %s, %s)",
-                  call.tenant_id, a["id"], a["status"], b.status, b.reason.strip(), sig["id"], call.user["id"],
-                  call.user["full_name"])
+        apply_status(call, a, b.status, b.reason, b.note, sig["id"])
         out.append({"id": a["id"], "code": a["code"], "from": a["status"], "to": b.status, "signature_id": sig["id"]})
     call.tx.x("SELECT set_config('app.status_change', '', true)")
     return {"changed": out}
