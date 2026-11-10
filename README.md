@@ -68,9 +68,27 @@ address (`commach.comp11labs.com`) and its own database, with an API that connec
   - Overview, asset list and labels show the next due date and overdue counts; the asset page has a Calibration tab.
   - The demo plant now carries about two years of calibration history, two OOT results and their assessments.
 
+- **Phase 3 – Preventive maintenance and annual plans**
+  - **PM checklists**: check (OK / not OK / N/A with remarks), reading with limits, text / value and photo items, each
+    with the page of the manual; spare parts to replace, suggested interval and estimated time. Approved by
+    e-signature (engineering manager or QA) and versioned.
+  - **Manual PDF → checklists (AI).** The AI reads the manual and proposes one checklist per frequency, every item and
+    spare part with its page number. The engineer edits and creates the drafts; the AI draft and the final checklist are
+    compared and recorded; each draft is then approved by signature.
+  - **Schedules** are fixed (calendar-based) by default, several per machine, planned for one asset or many at once.
+    A **working calendar** (weekend days, holidays, shutdowns, Ramadan if wanted) moves due dates to working days.
+  - **Annual plans** per site for calibration and for PM: a year grid of done, open and projected due dates, reviewed
+    by an engineering supervisor and approved by QA with e-signatures (two different people), printable as a PDF.
+    With *plan approval* on (the default), work is released only from an approved plan.
+  - **Execution on phones and tablets:** accept the job, work the checklist with large buttons, take photos, record
+    readings, spare parts used and man-hours, sign **Done by**; a supervisor signs **Checked by**. Findings are
+    recorded with the job without quarantining the machine.
+  - The demo plant now also has 10 PM checklists, about 40 machines, utilities and safety items with a year of PM history,
+    approved plans for this year and a next-year maintenance plan waiting for QA approval.
+
 The web app is English and Arabic (right-to-left), with light, dark and system themes, and works on phones and tablets.
 
-See [docs/ROADMAP.md](docs/ROADMAP.md) for the next phases (preventive maintenance comes next),
+See [docs/ROADMAP.md](docs/ROADMAP.md) for the next phases (tasks, calendar and e-mail notifications come next),
 [docs/PART11.md](docs/PART11.md) for the 21 CFR Part 11 traceability and [docs/INTEGRATION.md](docs/INTEGRATION.md)
 for connecting Complanning.
 

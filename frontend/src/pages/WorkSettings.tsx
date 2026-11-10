@@ -7,7 +7,65 @@ import { get, put } from "../lib/api";
 import { useI18n } from "../lib/i18n";
 import type { StringKey } from "../lib/strings";
 
-interface WS { tolerance: { calibration: Rule[]; pm: Rule[] }; due_soon_days: number; quarantine_on_fail: boolean; uncertainty_ratio_min: number }
+interface Closure { from: string; to: string; name: string }
+interface Cal { weekend: number[]; closures: Closure[]; shift: "earlier" | "later"; kinds: ("calibration" | "pm")[] }
+interface WS { tolerance: { calibration: Rule[]; pm: Rule[] }; due_soon_days: number; quarantine_on_fail: boolean; uncertainty_ratio_min: number; calendar: Cal }
+
+function CalendarEditor({ cal, onChange }: { cal: Cal; onChange: (c: Cal) => void }) {
+  const { t } = useI18n();
+  const order = [5, 6, 0, 1, 2, 3, 4];   // Saturday first, as on Egyptian and Gulf calendars
+  const setC = (i: number, p: Partial<Closure>) => onChange({ ...cal, closures: cal.closures.map((c, j) => (j === i ? { ...c, ...p } : c)) });
+  return (
+    <section className="panel">
+      <div className="panel-head"><h3>{t("cal.title")}</h3></div>
+      <div className="panel-body stack">
+        <p className="small muted">{t("cal.lead")}</p>
+        <div className="field">
+          <span className="field-label">{t("cal.weekend")}</span>
+          <div className="chip-row">
+            {order.map((d) => (
+              <button key={d} type="button" className="chip" aria-pressed={cal.weekend.includes(d)}
+                onClick={() => onChange({ ...cal, weekend: cal.weekend.includes(d) ? cal.weekend.filter((x) => x !== d) : [...cal.weekend, d] })}>{t(`day.${d}` as StringKey)}</button>
+            ))}
+          </div>
+        </div>
+        <div className="grid-2">
+          <div className="field">
+            <span className="field-label">{t("cal.shift")}</span>
+            <div className="seg" role="group" aria-label={t("cal.shift")}>
+              {(["earlier", "later"] as const).map((x) => <button key={x} type="button" aria-pressed={cal.shift === x} onClick={() => onChange({ ...cal, shift: x })}>{t(`cal.shift.${x}` as StringKey)}</button>)}
+            </div>
+          </div>
+          <div className="field">
+            <span className="field-label">{t("cal.kinds")}</span>
+            <div className="chip-row">
+              {(["pm", "calibration"] as const).map((k) => (
+                <button key={k} type="button" className="chip" aria-pressed={cal.kinds.includes(k)}
+                  onClick={() => onChange({ ...cal, kinds: cal.kinds.includes(k) ? cal.kinds.filter((x) => x !== k) : [...cal.kinds, k] })}>{t(k === "pm" ? "ws.pm" : "ws.cal")}</button>
+              ))}
+            </div>
+          </div>
+        </div>
+        <div className="field">
+          <span className="field-label">{t("cal.closures")}</span>
+          {cal.closures.length === 0 ? <span className="small subtle">{t("cal.none")}</span> : (
+            <div className="table-wrap"><table className="table edit-table">
+              <thead><tr><th>{t("cal.from")}</th><th>{t("cal.to")}</th><th>{t("cal.name")}</th><th /></tr></thead>
+              <tbody>{cal.closures.map((c, i) => (
+                <tr key={i}>
+                  <td><input className="input cell-input" style={{ width: 150 }} type="date" aria-label={t("cal.from")} value={c.from} onChange={(e) => setC(i, { from: e.target.value, to: c.to && c.to >= e.target.value ? c.to : e.target.value })} /></td>
+                  <td><input className="input cell-input" style={{ width: 150 }} type="date" aria-label={t("cal.to")} value={c.to} min={c.from} onChange={(e) => setC(i, { to: e.target.value })} /></td>
+                  <td><input className="input cell-input wide" aria-label={t("cal.name")} value={c.name} maxLength={120} onChange={(e) => setC(i, { name: e.target.value })} /></td>
+                  <td><Button size="sm" variant="ghost" iconOnly aria-label={t("common.delete")} icon={<LuTrash2 />} onClick={() => onChange({ ...cal, closures: cal.closures.filter((_, j) => j !== i) })} /></td>
+                </tr>))}</tbody>
+            </table></div>
+          )}
+          <div><Button size="sm" icon={<LuPlus />} onClick={() => { const d = new Date().toISOString().slice(0, 10); onChange({ ...cal, closures: [...cal.closures, { from: d, to: d, name: "" }] }); }}>{t("cal.add")}</Button></div>
+        </div>
+      </div>
+    </section>
+  );
+}
 
 function Bands({ kind, bands, onChange }: { kind: "calibration" | "pm"; bands: Rule[]; onChange: (b: Rule[]) => void }) {
   const { t } = useI18n();
@@ -70,7 +128,8 @@ export function WorkSettingsTab() {
     setBusy(true); setErr(null);
     try {
       setData(await put<{ settings: WS }>("/api/settings/work", { calibration: s.tolerance.calibration, pm: s.tolerance.pm,
-        due_soon_days: s.due_soon_days, quarantine_on_fail: s.quarantine_on_fail, uncertainty_ratio_min: s.uncertainty_ratio_min }));
+        due_soon_days: s.due_soon_days, quarantine_on_fail: s.quarantine_on_fail, uncertainty_ratio_min: s.uncertainty_ratio_min,
+        calendar: { ...s.calendar, closures: s.calendar.closures.filter((c) => c.from && c.name.trim()) } }));
       toast(t("list.saved"));
     } catch (e) { setErr(errorText(e, t)); } finally { setBusy(false); }
   };
@@ -82,6 +141,7 @@ export function WorkSettingsTab() {
         <Bands kind="calibration" bands={s.tolerance.calibration} onChange={(b) => set({ tolerance: { ...s.tolerance, calibration: b } })} />
         <Bands kind="pm" bands={s.tolerance.pm} onChange={(b) => set({ tolerance: { ...s.tolerance, pm: b } })} />
       </div>
+      <CalendarEditor cal={s.calendar} onChange={(c) => set({ calendar: c })} />
       <section className="panel"><div className="panel-body stack">
         <label className="row"><span className="grow">{t("ws.dueSoon")}</span>
           <input className="input" type="number" min={1} max={180} style={{ width: 90 }} aria-label={t("ws.dueSoon")} value={s.due_soon_days}

@@ -1,6 +1,6 @@
 import { useEffect, useState, type ReactNode } from "react";
 import {
-  LuBoxes, LuBuilding2, LuCalendarClock, LuChartLine, LuChevronDown, LuClipboardCheck, LuFileSpreadsheet, LuFileText,
+  LuBoxes, LuBuilding2, LuCalendarClock, LuCalendarRange, LuClipboardList, LuChartLine, LuChevronDown, LuClipboardCheck, LuFileSpreadsheet, LuFileText,
   LuHouse, LuKeyRound, LuLanguages, LuListChecks, LuLogOut, LuMapPin, LuMenu, LuMonitor, LuMoon, LuNetwork, LuScrollText,
   LuSearch, LuSettings, LuShieldAlert, LuSun, LuTags, LuTruck, LuUsers, LuWrench, LuX,
 } from "react-icons/lu";
@@ -36,6 +36,12 @@ function groupsFor(isPlatform: boolean, isAdmin: boolean, canAudit: boolean): Na
       { to: "/calibration", label: "nav.calWork", icon: <LuClipboardCheck /> },
       { to: "/calibration/templates", label: "nav.calTemplates", icon: <LuListChecks /> },
       { to: "/calibration/impacts", label: "nav.impacts", icon: <LuShieldAlert /> },
+      { to: "/plans/calibration", label: "nav.calPlan", icon: <LuCalendarRange /> },
+    ] },
+    { title: "nav.maintenance", items: [
+      { to: "/maintenance", label: "nav.pmWork", icon: <LuWrench /> },
+      { to: "/maintenance/templates", label: "nav.pmTemplates", icon: <LuClipboardList /> },
+      { to: "/plans/pm", label: "nav.pmPlan", icon: <LuCalendarRange /> },
     ] },
     { title: "nav.lists", items: [
       { to: "/classes", label: "nav.classes", icon: <LuTags /> },
@@ -43,7 +49,6 @@ function groupsFor(isPlatform: boolean, isAdmin: boolean, canAudit: boolean): Na
       { to: "/departments", label: "nav.departments", icon: <LuNetwork /> },
     ] },
     { title: "nav.coming", items: [
-      { label: "nav.maintenance", icon: <LuWrench />, phase: 3 },
       { label: "nav.tasks", icon: <LuCalendarClock />, phase: 4 },
       { label: "nav.forms", icon: <LuFileText />, phase: 5 },
       { label: "nav.analysis", icon: <LuChartLine />, phase: 6 },
@@ -76,6 +81,7 @@ function FindCode() {
 
 function isCurrent(path: string, to: string) {
   if (to === "/calibration" && /^\/calibration\/(templates|impacts)/.test(path)) return false;
+  if (to === "/maintenance" && /^\/maintenance\/templates/.test(path)) return false;
   return to === "/" ? path === "/" : path === to || path.startsWith(to + "/");
 }
 

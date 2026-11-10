@@ -65,11 +65,11 @@ export function TaskStateBadge({ task }: { task: Pick<TaskRow, "status" | "overd
   return <Badge tone={tone} dot>{t(`ts.${task.status}` as StringKey)}</Badge>;
 }
 
-export function VerdictBadge({ verdict }: { verdict: Verdict | null | undefined }) {
+export function VerdictBadge({ verdict, kind = "calibration" }: { verdict: Verdict | null | undefined; kind?: "calibration" | "pm" }) {
   const { t } = useI18n();
   if (!verdict) return null;
-  const tone = verdict === "pass" ? "ok" : verdict === "adjusted" ? "warn" : "danger";
-  return <Badge tone={tone}>{t(`verdict.${verdict}` as StringKey)}</Badge>;
+  const tone = verdict === "pass" ? "ok" : verdict === "adjusted" || kind === "pm" ? "warn" : "danger";
+  return <Badge tone={tone}>{t(kind === "pm" ? `verdict.pm.${verdict}` as StringKey : `verdict.${verdict}` as StringKey)}</Badge>;
 }
 
 export function useRuleText() {
@@ -147,11 +147,14 @@ export function problemText(p: string, t: ReturnType<typeof useI18n>["t"], tx: R
 }
 
 // ------------------------------------------------------------------ schedule sheet
-interface TemplateOpt { id: string; code: string; version: number; title: string; status: string; item_count: number }
+interface TemplateOpt { id: string; code: string; version: number; title: string; status: string; item_count: number; suggested_interval_value?: number | null; suggested_interval_unit?: Schedule["interval_unit"] | null }
 
-export function SchedulePlanner({ assets, schedule, onClose, onDone }: {
+export function SchedulePlanner({ assets, schedule, onClose, onDone, kind = "calibration" }: {
   assets: { id: string; code: string; site_id?: string }[]; schedule?: Schedule; onClose: () => void; onDone: () => void;
+  kind?: "calibration" | "pm";
 }) {
+  const pm = (schedule?.kind ?? kind) === "pm";
+  const k = pm ? "pm" : "calibration";
   const { t } = useI18n();
   const toast = useToast();
   const day = useDay();
@@ -163,7 +166,7 @@ export function SchedulePlanner({ assets, schedule, onClose, onDone }: {
   const [templateId, setTemplateId] = useState(schedule?.template_id ?? "");
   const [ivalue, setIvalue] = useState(String(schedule?.interval_value ?? 12));
   const [iunit, setIunit] = useState<Schedule["interval_unit"]>(schedule?.interval_unit ?? "month");
-  const [basis, setBasis] = useState<Schedule["basis"]>(schedule?.basis ?? "floating");
+  const [basis, setBasis] = useState<Schedule["basis"]>(schedule?.basis ?? (pm ? "fixed" : "floating"));
   const [own, setOwn] = useState(!!(schedule?.tol_after_unit || schedule?.tol_before_unit));
   const [bv, setBv] = useState(schedule?.tol_before_value != null ? String(schedule.tol_before_value) : "");
   const [bu, setBu] = useState<TolUnit>(schedule?.tol_before_unit ?? "any");
@@ -172,21 +175,21 @@ export function SchedulePlanner({ assets, schedule, onClose, onDone }: {
   const [performer, setPerformer] = useState<Schedule["performer"]>(schedule?.performer ?? "internal");
   const [vendorId, setVendorId] = useState(schedule?.vendor_id ?? "");
   const [responsible, setResponsible] = useState(schedule?.responsible_user_id ?? "");
-  const [roles, setRoles] = useState<string[]>(schedule?.assignee_roles ?? ["qa_calibration_officer"]);
+  const [roles, setRoles] = useState<string[]>(schedule?.assignee_roles ?? [pm ? "maintenance_technician" : "qa_calibration_officer"]);
   const [users, setUsers] = useState<string[]>(schedule?.assignee_user_ids ?? []);
-  const [certReq, setCertReq] = useState<boolean | null>(schedule ? schedule.certificate_required : null);
+  const [certReq, setCertReq] = useState<boolean | null>(schedule ? schedule.certificate_required : pm ? false : null);
   const [firstDue, setFirstDue] = useState(schedule?.next_due ?? "");
   const [lastDone, setLastDone] = useState("");
   const [stagger, setStagger] = useState("0");
   const [notes, setNotes] = useState(schedule?.notes ?? "");
   const [reason, setReason] = useState("");
-  const [preview, setPreview] = useState<{ dates: { due: string; window_start: string | null; window_end: string }[]; rule: Rule } | null>(null);
+  const [preview, setPreview] = useState<{ dates: { due: string; window_start: string | null; window_end: string; moved_from?: string | null }[]; rule: Rule } | null>(null);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [errs, setErrs] = useState<Record<string, string>>({});
 
   useEffect(() => {
-    get<{ items: TemplateOpt[] }>("/api/templates?kind=calibration").then((r) => setTemplates(r.items)).catch(() => {});
+    get<{ items: TemplateOpt[] }>(`/api/templates?kind=${k}`).then((r) => setTemplates(r.items)).catch(() => {});
     get<{ items: Vendor[] }>("/api/vendors").then((r) => setVendors(r.items.filter((v) => v.active))).catch(() => {});
     get<{ items: Person[] }>("/api/people").then((r) => setPeople(r.items)).catch(() => {});
   }, []);
@@ -199,7 +202,7 @@ export function SchedulePlanner({ assets, schedule, onClose, onDone }: {
   const previewKey = JSON.stringify([iv, iunit, basis, tol, firstDue, lastDone]);
   useEffect(() => {
     const h = setTimeout(() => {
-      post("/api/schedules/preview", { kind: "calibration", interval_value: iv, interval_unit: iunit, basis, ...tol,
+      post("/api/schedules/preview", { kind: k, interval_value: iv, interval_unit: iunit, basis, ...tol,
         first_due: firstDue || null, last_done: !firstDue && lastDone ? lastDone : null })
         .then(setPreview).catch(() => setPreview(null));
     }, 250);
@@ -225,7 +228,7 @@ export function SchedulePlanner({ assets, schedule, onClose, onDone }: {
         toast(t("list.saved"));
       } else {
         const r = await post<{ created: unknown[]; skipped: unknown[] }>("/api/schedules", {
-          ...body, kind: "calibration", asset_ids: assets.map((a) => a.id), first_due: firstDue || null,
+          ...body, kind: k, asset_ids: assets.map((a) => a.id), first_due: firstDue || null,
           last_done: !firstDue && lastDone ? lastDone : null, stagger_days: Number(stagger) || 0,
         });
         toast(t("sch.created", { n: r.created.length }) + (r.skipped.length ? ` · ${t("sch.skipped", { n: r.skipped.length })}` : ""));
@@ -237,20 +240,25 @@ export function SchedulePlanner({ assets, schedule, onClose, onDone }: {
   const unitOpts = (["day", "week", "month", "year"] as const).map((u) => ({ value: u, label: t(`unit.${u}` as StringKey) }));
   const tolOpts = (withAny: boolean) => (withAny ? ["any", "day", "week", "month", "percent"] : ["day", "week", "month", "percent"])
     .map((u) => ({ value: u, label: t(`unit.${u}` as StringKey) }));
-  const title = editing ? t("sch.titleEdit") : t("sch.title");
+  const title = pm ? (editing ? t("sch.titlePmEdit") : t("sch.titlePm")) : editing ? t("sch.titleEdit") : t("sch.title");
+  const pickTemplate = (id: string) => {
+    setTemplateId(id);
+    const x = templates.find((y) => y.id === id);
+    if (x?.suggested_interval_value && x.suggested_interval_unit && !editing) { setIvalue(String(x.suggested_interval_value)); setIunit(x.suggested_interval_unit); }
+  };
   const lead = assets.length === 1 ? assets[0].code : t("sch.assets", { n: assets.length });
   return (
     <Sheet wide title={title} lead={lead} onClose={onClose} onSubmit={submit} footer={<>
       <Button onClick={onClose}>{t("common.cancel")}</Button>
       <Button type="submit" variant="primary" busy={busy} icon={<LuCalendarClock />}
-        disabled={performer === "external" && !vendorId}>{editing ? t("common.save") : t("sch.title")}</Button>
+        disabled={performer === "external" && !vendorId}>{editing ? t("common.save") : title}</Button>
     </>}>
       {err && <Notice tone="danger">{err}</Notice>}
       {assets.length > 1 && <div className="chip-row">{assets.slice(0, 40).map((a) => <span key={a.id} className="chip mono-id">{a.code}</span>)}
         {assets.length > 40 && <span className="chip">+{assets.length - 40}</span>}</div>}
       <div className="cm-sched">
         <div className="stack">
-          <SelectField label={t("sch.template")} value={templateId} onChange={setTemplateId} error={errs.template_id}
+          <SelectField label={pm ? t("sch.checklist") : t("sch.template")} value={templateId} onChange={pickTemplate} error={errs.template_id}
             options={[{ value: "", label: t("sch.noTemplate") }, ...templates.map((x) => ({
               value: x.id, label: `${x.code} v${x.version} · ${x.title}${x.status === "draft" ? ` (${t("tpl.status.draft")})` : ""}`,
             }))]} />
@@ -330,7 +338,7 @@ export function SchedulePlanner({ assets, schedule, onClose, onDone }: {
               </div>
             </div>
           )}
-          <label className="row small"><Switch checked={certRequired} onChange={setCertReq} label={t("sch.certRequired")} />{t("sch.certRequired")}</label>
+          {!pm && <label className="row small"><Switch checked={certRequired} onChange={setCertReq} label={t("sch.certRequired")} />{t("sch.certRequired")}</label>}
           <div className="grid-2">
             <TextField label={editing ? t("sch.nextDue") : t("sch.firstDue")} type="date" value={firstDue} onChange={setFirstDue} />
             {!editing && <TextField label={t("sch.lastDone")} type="date" value={lastDone} onChange={setLastDone} disabled={!!firstDue} />}
@@ -348,6 +356,7 @@ export function SchedulePlanner({ assets, schedule, onClose, onDone }: {
                 {preview.dates.slice(0, 8).map((d) => (
                   <li key={d.due}>
                     <strong className="num">{day(d.due)}</strong>
+                    {d.moved_from && <span className="small text-warn">{t("cal.moved", { date: day(d.moved_from) })}</span>}
                     <span className="small subtle">{d.window_start ? t("cw.windowRange", { start: day(d.window_start), end: day(d.window_end) })
                       : t("cw.windowAny", { end: day(d.window_end) })}</span>
                   </li>

@@ -289,7 +289,7 @@ export const calEn = {
   "ia.unknown": "unknown",
 
   // settings
-  "settings.tab.work": "Calibration rules",
+  "settings.tab.work": "Calibration and PM rules",
   "ws.lead": "Tolerance windows per interval band. Early may be 'any time' (usual for calibration); late is how long after the due date the work may still be done before it is overdue. A schedule can override its band.",
   "ws.cal": "Calibration",
   "ws.pm": "Preventive maintenance",
@@ -614,7 +614,7 @@ export const calAr: Record<keyof typeof calEn, string> = {
   "ia.emptyBody": "يُفتح التقييم تلقائيًا عند خروج معايرة عن السماحية.",
   "ia.unknown": "غير معروف",
 
-  "settings.tab.work": "قواعد المعايرة",
+  "settings.tab.work": "قواعد المعايرة والصيانة",
   "ws.lead": "نوافذ السماحية لكل نطاق من الفترات. يمكن أن يكون التنفيذ المبكر «في أي وقت» (المعتاد في المعايرة)؛ والتأخير هو المدة المسموحة بعد تاريخ الاستحقاق قبل أن تصبح المهمة متأخرة. يمكن للجدول أن يتجاوز قاعدة نطاقه.",
   "ws.cal": "المعايرة",
   "ws.pm": "الصيانة الوقائية",

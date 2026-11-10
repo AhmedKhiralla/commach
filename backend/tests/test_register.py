@@ -273,6 +273,10 @@ def test_sample_data(server, platform):
     admin = sign_in_first_time(server, "demo@comp11.test", body["temporary_password"], "Demo#Admin2026x")
     status, out, _ = admin.post("/api/sample-data", {"give_me_roles": True})
     assert status == 200, out
+    assert out["pm_schedules"] > 30 and out["pm_templates"] == 10 and out["plans"] == 4
+    _, pm, _ = admin.get("/api/tasks?kind=pm&state=overdue")
+    assert {x["asset_code"] for x in pm["items"]} == {"BL-02", "AHU-03", "CA-01"}
+    assert all(x["plan_status"] == "approved" for x in pm["items"])
     assert out["assets"] > 120
     _, tree, _ = admin.get("/api/tree")
     site = tree["sites"][0]

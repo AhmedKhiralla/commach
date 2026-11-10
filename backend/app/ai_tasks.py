@@ -487,3 +487,147 @@ def run_impact(call: Call, i: dict) -> dict:
     result = {"fields": fields, "risk_reason": str(d.get("risk_reason") or "")[:1000]}
     s = store_suggestion(call, "impact", p, out["model"], result, input_sha=hashlib.sha256(context.encode()).hexdigest())
     return {"suggestion": s, **result}
+
+
+# ------------------------------------------------------------------ maintenance manual -> PM checklists
+PROMPTS["manual"] = "manual-v1"
+
+MANUAL_PROMPT = """You read equipment maintenance manuals (operation and maintenance manuals, service manuals) for a GMP
+preventive-maintenance system. From the manual pages below, draft the preventive maintenance checklists the
+manufacturer asks for, grouped by frequency (for example daily, weekly, monthly, every 6 months, yearly, or every
+N operating hours converted to the nearest calendar interval with a note).
+
+Rules:
+- Use only what the manual says. Every item and spare part carries the page number where it is written ("page").
+- Item types: "check" (inspect/clean/lubricate/tighten, answered OK / not OK), "reading" (a value to measure with
+  "unit", "low_limit", "high_limit" when the manual gives them), "text" (a value to note, e.g. a counter), "photo".
+- Write each item as a short imperative instruction a technician can follow on a tablet.
+- Leave out operator tasks done at every batch (cleaning between batches) unless the manual lists them as maintenance.
+- Spare parts: the parts the manual says to replace at that frequency, with part numbers and quantities if given.
+- interval_unit is one of day, week, month, year.
+
+Equipment we expect: {expected}
+
+Return JSON:
+{{"equipment": {{"manufacturer": "...", "model": "...", "description": "..."}},
+  "groups": [{{"title": "e.g. Monthly preventive maintenance", "interval_value": 1, "interval_unit": "month",
+              "est_minutes": number or null,
+              "items": [{{"item_type": "check", "parameter": "...", "unit": null, "low_limit": null, "high_limit": null,
+                         "page": "12", "notes": "..."}}],
+              "spare_parts": [{{"name": "...", "part_no": "...", "qty": 1, "unit": "pcs", "page": "40", "notes": "..."}}]}}],
+  "notes": "what the reviewer should check (pages not readable, hours-based intervals converted, safety warnings)"}}
+
+Manual pages:
+{pages}"""
+
+
+def manual_pages(data: bytes, max_pages: int = 80) -> tuple[list[tuple[int, str]], int]:
+    import pypdfium2 as pdfium
+    pdf = pdfium.PdfDocument(io.BytesIO(data))
+    out = []
+    for i in range(min(len(pdf), max_pages)):
+        try:
+            text = pdf[i].get_textpage().get_text_range() or ""
+        except Exception:
+            text = ""
+        out.append((i + 1, " ".join(text.split())))
+    return out, len(pdf)
+
+
+def run_manual(call: Call, f: dict, data: bytes, expected: str) -> dict:
+    """Draft PM checklists from a manual. One suggestion per frequency group; nothing is saved as a template."""
+    p = provider_for(call, "ai_manual")
+    mode = "text"
+    if f["mime"] == "application/pdf":
+        try:
+            pages, total = manual_pages(data)
+        except Exception:
+            raise ApiError(422, "bad_file", "This manual could not be opened.")
+        text_len = sum(len(t) for _, t in pages)
+    else:
+        pages, total, text_len = [], 1, 0
+    if text_len >= 400:
+        budget, parts = 48000, []
+        for n, t in pages:
+            if not t:
+                continue
+            chunk = f"--- page {n} ---\n{t}\n"
+            if budget - len(chunk) < 0:
+                parts.append(f"--- page {n} ---\n{t[:max(0, budget)]}\n")
+                break
+            parts.append(chunk)
+            budget -= len(chunk)
+        content = [{"type": "text", "text": MANUAL_PROMPT.format(expected=expected[:600], pages="".join(parts))}]
+        model = p.text_model
+        pages_read = len(parts)
+    else:
+        # scanned manual: read the first pages as images
+        mode = "vision"
+        imgs = []
+        try:
+            if f["mime"] == "application/pdf":
+                import pypdfium2 as pdfium
+                pdf = pdfium.PdfDocument(io.BytesIO(data))
+                for i in range(min(len(pdf), 8)):
+                    img = pdf[i].render(scale=1.6).to_pil().convert("RGB")
+                    img.thumbnail((1400, 1900))
+                    imgs.append(img)
+            else:
+                imgs = [image_from_file(f["mime"], data)]
+        except Exception:
+            raise ApiError(422, "bad_file", "This manual could not be opened.")
+        content = [{"type": "text", "text": MANUAL_PROMPT.format(expected=expected[:600],
+                                                                  pages="(images of the first pages follow; page numbers in order)")}]
+        content += [{"type": "image_url", "image_url": {"url": ai.img_data_url(i)}} for i in imgs]
+        model = p.vision_model
+        pages_read = len(imgs)
+    try:
+        out = ai.chat(p, model, [{"role": "user", "content": content}], max_tokens=6000, timeout=180)
+    except ai.AIUnavailable as e:
+        raise ApiError(502, "ai_failed", f"The AI could not read the manual: {e}")
+    record_usage(call, out.get("usage"))
+    x = out["data"] if isinstance(out["data"], dict) else {}
+    groups = []
+    for g in (x.get("groups") or [])[:12]:
+        if not isinstance(g, dict):
+            continue
+        unit = g.get("interval_unit") if g.get("interval_unit") in ("day", "week", "month", "year") else None
+        try:
+            value = max(1, min(3650, int(g.get("interval_value") or 1)))
+        except (TypeError, ValueError):
+            value = 1
+        items = []
+        for it in (g.get("items") or [])[:120]:
+            if not isinstance(it, dict) or not str(it.get("parameter") or "").strip():
+                continue
+            t = it.get("item_type") if it.get("item_type") in ("check", "reading", "text", "photo") else "check"
+            lo, hi = _num(it.get("low_limit")), _num(it.get("high_limit"))
+            if lo is not None and hi is not None and lo > hi:
+                lo, hi = hi, lo
+            items.append({"item_type": t, "parameter": str(it["parameter"]).strip()[:200], "unit": (str(it.get("unit") or "").strip() or None),
+                          "low_limit": lo if t == "reading" else None, "high_limit": hi if t == "reading" else None,
+                          "page_ref": str(it.get("page") or "").strip()[:40] or None, "notes": str(it.get("notes") or "").strip()[:500] or None})
+        parts_ = []
+        for sp in (g.get("spare_parts") or [])[:60]:
+            if isinstance(sp, dict) and str(sp.get("name") or "").strip():
+                parts_.append({"name": str(sp["name"]).strip()[:200], "part_no": str(sp.get("part_no") or "").strip()[:80] or None,
+                               "qty": _num(sp.get("qty")), "unit": str(sp.get("unit") or "").strip()[:20] or None,
+                               "page_ref": str(sp.get("page") or "").strip()[:40] or None, "notes": str(sp.get("notes") or "").strip()[:300] or None})
+        if not items:
+            continue
+        group = {"title": str(g.get("title") or "Preventive maintenance").strip()[:200], "interval_value": value,
+                 "interval_unit": unit or "month", "est_minutes": _int(g.get("est_minutes")), "items": items, "spare_parts": parts_}
+        fields = {"title": group["title"], "interval": f"{value} {group['interval_unit']}",
+                  "items": [f"{i['item_type']}: {i['parameter']}" for i in items], "spare_parts": [sp["name"] for sp in parts_]}
+        s = store_suggestion(call, "manual", p, out["model"], {"fields": fields, "group": group}, file_id=str(f["id"]),
+                             input_sha=f["sha256"])
+        groups.append({"suggestion": s, **group})
+    return {"groups": groups, "equipment": x.get("equipment") or {}, "notes": str(x.get("notes") or "")[:2000],
+            "pages_read": pages_read, "pages_total": total, "mode": mode}
+
+
+def _int(v):
+    try:
+        return max(1, min(100000, int(float(v)))) if v not in (None, "") else None
+    except (TypeError, ValueError):
+        return None

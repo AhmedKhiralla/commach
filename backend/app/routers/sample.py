@@ -325,9 +325,11 @@ def load_sample(call: Call):
                  " VALUES (%s, %s, NULL, %s, %s, 'demo_data', %s, %s)", tid, aid, status,
                  note or "Loaded as demonstration data", call.user["id"], call.user["full_name"])
     cal_counts = load_calibration(call, sid, ids, vendors, today)
+    cal_counts.update(load_pm(call, sid, ids, vendors, today))
+    cal_counts["plans"] = load_plans(call, sid, today)
     tx.x("SELECT set_config('app.status_change', '', true)")
     if b.give_me_roles:
-        for role in ("qa_approver", "engineering_manager", "qa_calibration_officer"):
+        for role in ("qa_approver", "engineering_manager", "qa_calibration_officer", "engineering_supervisor"):
             tx.x("INSERT INTO user_site_roles (tenant_id, user_id, site_id, role) VALUES (%s, %s, %s::uuid, %s)"
                  " ON CONFLICT DO NOTHING", tid, call.user["id"], sid, role)
     tx.event("SAMPLE_DATA", "sites", sid, "Demo plant",
@@ -571,3 +573,237 @@ import decimal as _decimal  # noqa: E402
 
 def decimal_(v) -> _decimal.Decimal:
     return v if isinstance(v, _decimal.Decimal) else _decimal.Decimal(str(v))
+
+
+# ================================================================== preventive maintenance demo
+# (code, title, title_ar, interval (value, unit), minutes, items [(type, text, unit, low, high, page)], spare parts)
+PM_TEMPLATES = [
+    ("PM-TP", "Tablet press – monthly PM", "ماكينة كبس الأقراص – صيانة شهرية", (1, "month"), 180, [
+        ("check", "Lubricate the turret, cam tracks and punch guides as per the lubrication chart", None, None, None, "6-4"),
+        ("check", "Inspect upper and lower punches and dies for wear, chipping and sticking", None, None, None, "6-7"),
+        ("check", "Check the feeder paddles and feeder seals; clean product build-up", None, None, None, "6-9"),
+        ("reading", "Hydraulic overload system pressure", "bar", 80, 120, "6-12"),
+        ("reading", "Main motor current at 40 rpm, no load", "A", 4, 9, "6-13"),
+        ("check", "Test the guard door interlocks and the emergency stop", None, None, None, "2-3"),
+        ("text", "Running hours counter", "h", None, None, "6-2"),
+        ("photo", "Photo of the turret after cleaning", None, None, None, None)],
+     [("Punch tip lubricant (food grade), 400 g", "LUB-FG-400", 1, "can"), ("Feeder seal kit", "P1200-FS-01", 1, "set")]),
+    ("PM-GRAN", "Granulation equipment – monthly PM", "معدات التحبيب – صيانة شهرية", (1, "month"), 120, [
+        ("check", "Inspect the impeller and chopper seals for leaks; check purge air", None, None, None, "5-2"),
+        ("check", "Check drive belts for tension and wear", None, None, None, "5-4"),
+        ("reading", "Impeller motor current at low speed", "A", 10, 30, "5-6"),
+        ("check", "Inspect the filter bags / filter cartridges and their clamps", None, None, None, "5-9"),
+        ("check", "Verify the emergency stop and the lid / bowl interlocks", None, None, None, "2-1"),
+        ("text", "Remarks on the earthing (grounding) clamp and cable", None, None, None, "2-4")],
+     [("Impeller shaft seal", "RMG-300-SS", 1, "pcs")]),
+    ("PM-COAT", "Coater – monthly PM", "المغلف – صيانة شهرية", (1, "month"), 120, [
+        ("check", "Clean the spray guns and check the nozzles and needles for wear", None, None, None, "7-3"),
+        ("check", "Check the pan drive chain and the gear box oil level", None, None, None, "7-5"),
+        ("reading", "Atomizing air pressure", "bar", 1.5, 3.0, "7-6"),
+        ("check", "Inspect the exhaust filter and duct for coating build-up", None, None, None, "7-8"),
+        ("check", "Test the door interlock and the emergency stop", None, None, None, "2-2")], []),
+    ("PM-PACK", "Packaging line machine – monthly PM", "ماكينة التعبئة – صيانة شهرية", (1, "month"), 150, [
+        ("check", "Check the forming and sealing heaters, thermocouples and cables", None, None, None, "8-2"),
+        ("reading", "Sealing station temperature at set point", "°C", 175, 195, "8-3"),
+        ("check", "Inspect the cutting knives and the perforation tool", None, None, None, "8-6"),
+        ("check", "Lubricate the chains and the cams as per the chart", None, None, None, "8-9"),
+        ("check", "Verify the vision system / missing tablet detection rejects a defective blister", None, None, None, "9-1"),
+        ("check", "Test the guard interlocks and the emergency stops", None, None, None, "2-3")],
+     [("Heater cartridge 230 V 400 W", "HC-230-400", 2, "pcs")]),
+    ("PM-AHU", "Air handling unit – quarterly PM", "وحدة مناولة الهواء – صيانة ربع سنوية", (3, "month"), 240, [
+        ("reading", "Pre-filter differential pressure", "Pa", 30, 150, "4-2"),
+        ("reading", "Fine filter differential pressure", "Pa", 60, 250, "4-2"),
+        ("check", "Check fan belt tension and alignment; replace if cracked", None, None, None, "4-5"),
+        ("reading", "Supply fan motor current", "A", 8, 18, "4-6"),
+        ("check", "Clean the cooling coil and the drain pan; check the drain trap", None, None, None, "4-8"),
+        ("check", "Grease the fan bearings", None, None, None, "4-9"),
+        ("check", "Check the dampers and actuators move freely", None, None, None, "4-11")],
+     [("Pre-filter G4 592×592×48", "G4-592-48", 4, "pcs"), ("V-belt SPA 1250", "SPA-1250", 2, "pcs")]),
+    ("PM-UTIL", "Utility system – quarterly PM", "نظام المرافق – صيانة ربع سنوية", (3, "month"), 180, [
+        ("check", "Inspect for leaks, abnormal noise and vibration", None, None, None, "3-1"),
+        ("reading", "Operating pressure", "bar", 6, 8.5, "3-3"),
+        ("check", "Drain condensate traps and check automatic drains", None, None, None, "3-5"),
+        ("check", "Check oil level / change oil if due by running hours", None, None, None, "3-7"),
+        ("text", "Running hours counter", "h", None, None, "3-2"),
+        ("check", "Test safety valves and pressure switches", None, None, None, "3-9")],
+     [("Air / oil separator element", "SEP-0750", 1, "pcs"), ("Compressor oil 5 L", "OIL-C5", 1, "can")]),
+    ("PM-EQUIP", "Process equipment – quarterly PM", "معدات التشغيل – صيانة ربع سنوية", (3, "month"), 60, [
+        ("check", "Inspect power cable, plugs and earthing", None, None, None, None),
+        ("check", "Clean fans, vents and filters", None, None, None, None),
+        ("check", "Check door gaskets and seals", None, None, None, None),
+        ("check", "Verify alarms and safety functions", None, None, None, None),
+        ("text", "Observations", None, None, None, None)], []),
+    ("PM-CHAMBER", "Stability chamber / cold store – quarterly PM", "غرفة الثبات / التبريد – صيانة ربع سنوية", (3, "month"), 90, [
+        ("check", "Clean the condenser coil and check the refrigerant sight glass", None, None, None, "5-1"),
+        ("check", "Check the humidifier water supply and drain (descale if needed)", None, None, None, "5-4"),
+        ("check", "Inspect door gaskets and door heaters", None, None, None, "5-6"),
+        ("check", "Test the high / low alarms and the remote alarm contact", None, None, None, "5-8"),
+        ("reading", "Compressor suction pressure", "bar", 1.5, 4.5, "5-3")], []),
+    ("PM-HPLC", "HPLC system – yearly preventive maintenance", "نظام HPLC – صيانة سنوية", (1, "year"), 240, [
+        ("check", "Replace pump piston seals and check valves; check for leaks", None, None, None, "9-4"),
+        ("check", "Replace the autosampler needle seat and rotor seal", None, None, None, "9-11"),
+        ("reading", "UV lamp intensity / remaining lamp life", "%", 30, 100, "9-18"),
+        ("reading", "Pump pressure ripple at 1 mL/min", "%", 0, 2, "9-6"),
+        ("check", "Perform the instrument self-tests and save the report", None, None, None, "9-20")],
+     [("Pump seal kit", "5063-6589", 1, "kit"), ("Needle seat", "G1367-87012", 1, "pcs"), ("Rotor seal", "0101-1416", 1, "pcs")]),
+    ("PM-SAFETY", "Safety equipment – monthly inspection", "معدات السلامة – فحص شهري", (1, "month"), 15, [
+        ("check", "In place, visible and access not blocked", None, None, None, None),
+        ("check", "Seal, pin and pressure gauge in the green zone / water flows clear", None, None, None, None),
+        ("check", "Inspection tag signed and dated", None, None, None, None)], []),
+]
+
+PM_FOR = {"TP": "PM-TP", "RMG": "PM-GRAN", "FBD": "PM-GRAN", "BLD": "PM-GRAN", "MIL": "PM-GRAN", "CP": "PM-COAT",
+          "CF": "PM-PACK", "BL": "PM-PACK", "CT": "PM-PACK"}
+PM_OVERDUE = {"BL-02": -9, "AHU-03": -21, "CA-01": -4}
+PM_SOON = {"TP-01": 3, "AHU-01": 6, "FE-01": 2, "HPLC-01": 12}
+
+
+def _pm_template(x: dict) -> str | None:
+    if x["parent"]:
+        return None
+    if x["cls"] == "MACHINE":
+        return PM_FOR.get(x["code"].split("-")[0], "PM-EQUIP")
+    if x["cls"] == "AHU":
+        return "PM-AHU"
+    if x["cls"] == "UTILITY":
+        return "PM-UTIL"
+    if x["cls"] in ("CHAMBER", "FRIDGE"):
+        return "PM-CHAMBER"
+    if x["cls"] == "LABINST" and x["code"].startswith("HPLC"):
+        return "PM-HPLC"
+    if x["cls"] == "SAFETY" and x["code"].startswith(("FE", "EW")):
+        return "PM-SAFETY"
+    if x["cls"] == "EQUIP" and x["code"] in ("LAF-01", "AC-01", "BSC-01", "OVEN-01", "INC-01", "MD-01", "CW-01"):
+        return "PM-EQUIP"
+    return None
+
+
+def load_pm(call: Call, sid: str, ids: dict[str, str], vendors: dict[str, str], today: dt.date) -> dict:
+    tx, tid = call.tx, call.tenant_id
+    settings = work.effective_settings(tx.val("SELECT work_settings FROM tenants WHERE id = %s", tid))
+    templates: dict[str, dict] = {}
+    for code, title, title_ar, (iv, iu), minutes, items, parts in PM_TEMPLATES:
+        t = tx.val("INSERT INTO templates (tenant_id, kind, code, title, title_ar, method_ref, status, source, spare_parts,"
+                   " suggested_interval_value, suggested_interval_unit, est_minutes)"
+                   " VALUES (%s, 'pm', %s, %s, %s, %s, 'draft', 'demo', %s::jsonb, %s, %s, %s) RETURNING id",
+                   tid, code, title, title_ar, f"SOP-ENG-{100 + len(templates):03d}",
+                   json.dumps([{"name": n, "part_no": p, "qty": q, "unit": u, "page_ref": None, "notes": None} for n, p, q, u in parts]),
+                   iv, iu, minutes)
+        its = []
+        for n, (typ, text, unit, lo, hi, page) in enumerate(items, start=1):
+            iid = tx.val("INSERT INTO template_items (tenant_id, template_id, seq, item_type, parameter, unit, tol_mode, low_limit,"
+                         " high_limit, required, page_ref) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id",
+                         tid, t, n, typ, text, unit, "limits" if typ == "reading" else None, lo, hi, typ != "photo", page)
+            its.append({"id": iid, "seq": n, "type": typ, "text": text, "unit": unit, "lo": lo, "hi": hi})
+        tx.x("UPDATE templates SET status = 'approved', approved_at = now(), approved_by_name = 'Engineering manager (demo)'"
+             " WHERE id = %s", t)
+        templates[code] = {"id": t, "items": its, "interval": (iv, iu), "parts": parts, "minutes": minutes}
+    counters: dict[int, int] = {}
+
+    def number(year: int) -> str:
+        counters[year] = counters.get(year, 0) + 1
+        return f"PM-{year}-{counters[year]:04d}"
+
+    n_sched = n_tasks = 0
+    for x in A:
+        if STATUS.get(x["code"], ("in_service", None))[0] in ("draft", "retired"):
+            continue
+        tcode = _pm_template(x)
+        if not tcode:
+            continue
+        tpl = templates[tcode]
+        iv, iu = tpl["interval"]
+        aid = ids[x["code"]]
+        idays = work.interval_days(iv, iu)
+        sch = {"kind": "pm", "interval_value": iv, "interval_unit": iu, "basis": "fixed", "tol_before_value": None,
+               "tol_before_unit": None, "tol_after_value": None, "tol_after_unit": None}
+        if x["code"] in PM_OVERDUE:
+            nominal = today + dt.timedelta(days=PM_OVERDUE[x["code"]] - 8)
+        elif x["code"] in PM_SOON:
+            nominal = today + dt.timedelta(days=PM_SOON[x["code"]])
+        else:
+            nominal = today + dt.timedelta(days=int(5 + _h("pm" + x["code"]) * max(1, idays - 8)))
+        performer = "external" if tcode == "PM-HPLC" else "internal"
+        vendor = vendors.get("PMS") if performer == "external" else None
+        roles = [] if performer == "external" else ["maintenance_technician"]
+        s_id = tx.val(
+            "INSERT INTO schedules (tenant_id, site_id, asset_id, kind, template_id, interval_value, interval_unit, basis,"
+            " performer, vendor_id, assignee_roles, last_done, next_due)"
+            " VALUES (%s, %s, %s, 'pm', %s, %s, %s, 'fixed', %s, %s, %s::text[], %s, %s) RETURNING id",
+            tid, sid, aid, tpl["id"], iv, iu, performer, vendor, roles, _back(nominal, iv, iu), nominal)
+        n_sched += 1
+        # a year of history
+        dues, d = [], _back(nominal, iv, iu)
+        while d > today - dt.timedelta(days=370) and len(dues) < 12:
+            dues.append(d)
+            d = _back(d, iv, iu)
+        for k, nd in enumerate(reversed(dues)):
+            due = work.working_day(nd, settings, "pm")
+            start, end = work.window(due, sch, settings)
+            performed = min(today - dt.timedelta(days=1), due + dt.timedelta(days=int((_h(x["code"] + "p" + str(k)) - 0.5) * 4)))
+            findings = _h(x["code"] + "f" + str(k)) > 0.93
+            t = tx.val(
+                "INSERT INTO tasks (tenant_id, site_id, asset_id, schedule_id, kind, number, template_id, due_date, window_start,"
+                " window_end, status, performer, vendor_id, assignee_roles, accepted_at, accepted_by_name, performed_date,"
+                " performed_by_name, verdict, remarks, man_hours, completed_at, completed_by_name, reviewed_at, reviewed_by_name, source)"
+                " VALUES (%s, %s, %s, %s, 'pm', %s, %s, %s, %s, %s, 'completed', %s, %s, %s::text[], %s, %s, %s, %s, %s, %s, %s, %s,"
+                " %s, %s, %s, 'demo') RETURNING id",
+                tid, sid, aid, s_id, number(due.year), tpl["id"], due, start, end, performer, vendor, roles,
+                dt.datetime.combine(performed, dt.time(8, 0)), "Maintenance technician (demo)", performed,
+                "Service engineer (demo)" if performer == "external" else "Maintenance technician (demo)",
+                "fail" if findings else "pass",
+                "Finding raised; corrective work order to follow." if findings else None,
+                round(tpl["minutes"] / 60 * (0.8 + _h(x["code"] + "m" + str(k)) * 0.5), 1),
+                dt.datetime.combine(performed, dt.time(15, 0)), "Maintenance technician (demo)",
+                dt.datetime.combine(performed, dt.time(16, 30)), "Engineering supervisor (demo)")
+            n_tasks += 1
+            bad_seq = 1 + int(_h(x["code"] + "b" + str(k)) * len(tpl["items"])) if findings else None
+            for it in tpl["items"]:
+                value = found = ok = None
+                if it["type"] == "check":
+                    value = "not_ok" if (findings and it["seq"] == bad_seq) else "ok"
+                    ok = value == "ok"
+                elif it["type"] == "reading":
+                    span = it["hi"] - it["lo"]
+                    found = round(it["lo"] + span * (0.3 + _h(x["code"] + str(it["seq"]) + str(k)) * 0.4), 2)
+                    ok = True
+                elif it["type"] == "text":
+                    value = str(1200 + k * 160 + int(_h(x["code"]) * 400)) if it["unit"] == "h" else "No remarks"
+                tx.x("INSERT INTO task_results (tenant_id, task_id, item_id, seq, item_type, parameter, unit, low_limit, high_limit,"
+                     " as_found, value_text, ok_found, notes, required) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
+                     tid, t, it["id"], it["seq"], it["type"], it["text"], it["unit"], it["lo"], it["hi"], found, value, ok,
+                     "Wear found; part ordered." if value == "not_ok" else None, it["type"] != "photo")
+            if tpl["parts"] and (k % 3 == 0 or iu == "year"):
+                n_, p_, q_, u_ = tpl["parts"][0]
+                tx.x("INSERT INTO task_parts (tenant_id, task_id, name, part_no, qty, unit) VALUES (%s, %s, %s, %s, %s, %s)",
+                     tid, t, n_, p_, q_, u_)
+        due = work.working_day(nominal, settings, "pm")
+        start, end = work.window(due, sch, settings)
+        tx.x("INSERT INTO tasks (tenant_id, site_id, asset_id, schedule_id, kind, number, template_id, due_date, window_start,"
+             " window_end, status, performer, vendor_id, assignee_roles, source)"
+             " VALUES (%s, %s, %s, %s, 'pm', %s, %s, %s, %s, %s, 'open', %s, %s, %s::text[], 'demo')",
+             tid, sid, aid, s_id, number(due.year), tpl["id"], due, start, end, performer, vendor, roles)
+        n_tasks += 1
+    for year, n in counters.items():
+        tx.x("INSERT INTO counters (tenant_id, key, value) VALUES (%s, %s, %s)"
+             " ON CONFLICT (tenant_id, key) DO UPDATE SET value = greatest(counters.value, EXCLUDED.value)", tid, f"PM-{year}", n)
+    return {"pm_schedules": n_sched, "pm_tasks": n_tasks, "pm_templates": len(PM_TEMPLATES)}
+
+
+def load_plans(call: Call, sid: str, today: dt.date) -> int:
+    """Demo plans: this year's plans approved; next year's calibration plan approved and its PM plan reviewed, waiting
+    for QA, so the QA approval can be shown."""
+    from .work import plan_content
+    n = 0
+    for kind in ("calibration", "pm"):
+        for year in (today.year, today.year + 1):
+            c = plan_content(call, sid, kind, year)
+            status = "reviewed" if (kind == "pm" and year > today.year) else "approved"
+            call.tx.x("INSERT INTO plans (tenant_id, site_id, kind, year, status, task_count, content_hash, reviewed_at,"
+                      " reviewed_by_name, approved_at, approved_by_name, source)"
+                      " VALUES (%s, %s, %s, %s, %s, %s, %s, now(), 'Engineering manager (demo)', %s, %s, 'demo')",
+                      call.tenant_id, sid, kind, year, status, c["count"], c["hash"],
+                      dt.datetime.now(dt.timezone.utc) if status == "approved" else None,
+                      "QA approver (demo)" if status == "approved" else None)
+            n += 1
+    return n

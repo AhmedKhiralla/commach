@@ -1,8 +1,8 @@
 // Calibration work list: KPIs, state tabs and the tasks with their tolerance windows.
 import { useEffect, useState } from "react";
-import { LuClipboardCheck, LuListChecks, LuShieldAlert } from "react-icons/lu";
+import { LuCalendarRange, LuClipboardCheck, LuListChecks, LuShieldAlert, LuWrench } from "react-icons/lu";
 import { CategoryIcon, Kpi } from "../components/cm";
-import { Button, Empty, LoadError, LoadingRows, PageHead, useLoad } from "../components/ui";
+import { Badge, Button, Empty, LoadError, LoadingRows, PageHead, useLoad } from "../components/ui";
 import { DueWhen, TaskStateBadge, VerdictBadge, useDay, type TaskRow } from "../components/work";
 import { get, qs } from "../lib/api";
 import { useI18n } from "../lib/i18n";
@@ -17,7 +17,7 @@ interface Counts {
   open: number; overdue: number; due_soon: number; at_vendor: number; in_progress: number; completed_30: number;
   oot_12m: number; to_review: number; impacts_open: number;
 }
-interface ListOut { items: TaskRow[]; total: number; page: number; counts: Counts; today: string; due_soon_days: number }
+interface ListOut { items: (TaskRow & { plan_status: string | null; template_title: string | null })[]; total: number; page: number; counts: Counts; today: string; due_soon_days: number; plan_gating: boolean }
 
 function readParams() {
   const p = new URLSearchParams(window.location.search);
@@ -26,7 +26,12 @@ function readParams() {
     page: Number(p.get("page") ?? "1") || 1 };
 }
 
-export function CalibrationWork() {
+export function CalibrationWork() { return <WorkList kind="calibration" />; }
+export function MaintenanceWork() { return <WorkList kind="pm" />; }
+
+function WorkList({ kind }: { kind: "calibration" | "pm" }) {
+  const pm = kind === "pm";
+  const base = pm ? "/maintenance" : "/calibration";
   const { t, lang, number } = useI18n();
   const { me } = useSession();
   const day = useDay();
@@ -37,9 +42,9 @@ export function CalibrationWork() {
   const [site, setSite] = useState(init.site_id);
   const [page, setPage] = useState(init.page);
   useEffect(() => { const h = setTimeout(() => { setTerm(q); setPage(1); }, 300); return () => clearTimeout(h); }, [q]);
-  const params = { kind: "calibration", state, q: term || undefined, site_id: site || undefined, page: page > 1 ? page : undefined };
+  const params = { kind, state, q: term || undefined, site_id: site || undefined, page: page > 1 ? page : undefined };
   const list = useLoad(() => get<ListOut>(`/api/tasks${qs(params)}`), [JSON.stringify(params)]);
-  useEffect(() => { navigate(`/calibration${qs({ state: state === "open" ? undefined : state, q: term, site_id: site, page: page > 1 ? page : undefined })}`, true); },
+  useEffect(() => { navigate(`${base}${qs({ state: state === "open" ? undefined : state, q: term, site_id: site, page: page > 1 ? page : undefined })}`, true); },
     [state, term, site, page]);
   const c = list.data?.counts;
   const today = list.data?.today ?? "";
@@ -49,27 +54,28 @@ export function CalibrationWork() {
   const sites = me?.sites ?? [];
   return (
     <>
-      <PageHead title={t("cw.title")} lead={t("cw.lead")} actions={<>
-        <Button icon={<LuListChecks />} onClick={() => navigate("/calibration/templates")}>{t("cw.templates")}</Button>
-        <Button icon={<LuShieldAlert />} onClick={() => navigate("/calibration/impacts")}>{t("cw.impacts")}</Button>
+      <PageHead title={pm ? t("pmw.title") : t("cw.title")} lead={pm ? t("pmw.lead") : t("cw.lead")} actions={<>
+        <Button icon={<LuListChecks />} onClick={() => navigate(`${base}/templates`)}>{pm ? t("pmw.templates") : t("cw.templates")}</Button>
+        <Button icon={<LuCalendarRange />} onClick={() => navigate(`/plans/${kind}`)}>{t("pmw.planLink")}</Button>
+        {!pm && <Button icon={<LuShieldAlert />} onClick={() => navigate("/calibration/impacts")}>{t("cw.impacts")}</Button>}
       </>} />
       <div className="panel">
         <div className="cm-kpis" style={{ borderTop: 0 }}>
           <button type="button" className="kpi-btn" onClick={() => pick("overdue")}><Kpi label={t("cw.k.overdue")} value={c ? number(c.overdue) : "–"} tone={c?.overdue ? "danger" : undefined} /></button>
           <button type="button" className="kpi-btn" onClick={() => pick("due_soon")}><Kpi label={t("cw.k.due_soon", { n: list.data?.due_soon_days ?? 30 })} value={c ? number(c.due_soon) : "–"} tone={c?.due_soon ? "warn" : undefined} /></button>
-          <button type="button" className="kpi-btn" onClick={() => pick("at_vendor")}><Kpi label={t("cw.k.at_vendor")} value={c ? number(c.at_vendor) : "–"} /></button>
+          {!pm && <button type="button" className="kpi-btn" onClick={() => pick("at_vendor")}><Kpi label={t("cw.k.at_vendor")} value={c ? number(c.at_vendor) : "–"} /></button>}
           <button type="button" className="kpi-btn" onClick={() => pick("in_progress")}><Kpi label={t("cw.k.in_progress")} value={c ? number(c.in_progress) : "–"} tone="brand" /></button>
           <button type="button" className="kpi-btn" onClick={() => pick("to_review")}><Kpi label={t("cw.k.to_review")} value={c ? number(c.to_review) : "–"} /></button>
-          <button type="button" className="kpi-btn" onClick={() => pick("oot")}><Kpi label={t("cw.k.oot")} value={c ? number(c.oot_12m) : "–"} tone={c?.oot_12m ? "warn" : undefined} /></button>
-          <button type="button" className="kpi-btn" onClick={() => navigate("/calibration/impacts")}><Kpi label={t("cw.k.impacts")} value={c ? number(c.impacts_open) : "–"} tone={c?.impacts_open ? "danger" : undefined} /></button>
+          <button type="button" className="kpi-btn" onClick={() => pick("oot")}><Kpi label={pm ? t("pmw.k.findings") : t("cw.k.oot")} value={c ? number(c.oot_12m) : "–"} tone={c?.oot_12m ? "warn" : undefined} /></button>
+          {!pm && <button type="button" className="kpi-btn" onClick={() => navigate("/calibration/impacts")}><Kpi label={t("cw.k.impacts")} value={c ? number(c.impacts_open) : "–"} tone={c?.impacts_open ? "danger" : undefined} /></button>}
         </div>
       </div>
       <div className="panel">
         <div className="toolbar cm-filters">
           <div className="seg" role="tablist" aria-label={t("cw.col.state")}>
-            {STATES.map((s) => (
+            {STATES.filter((s) => !(pm && s === "at_vendor")).map((s) => (
               <button key={s} type="button" role="tab" aria-pressed={state === s} aria-selected={state === s} onClick={() => pick(s)}>
-                {t(`cw.state.${s}` as StringKey)}
+                {pm && s === "oot" ? t("pmw.state.oot") : t(`cw.state.${s}` as StringKey)}
                 {c && s in c ? <span className="subtle">{number((c as unknown as Record<string, number>)[s])}</span> : null}
               </button>
             ))}
@@ -85,7 +91,7 @@ export function CalibrationWork() {
           {list.data && <span className="small muted">{number(list.data.total)}</span>}
         </div>
         {list.error ? <LoadError error={list.error} onRetry={list.reload} /> : list.data && list.data.items.length === 0 ? (
-          <Empty icon={<LuClipboardCheck />} title={t("cw.empty")} body={t("cw.emptyBody")} />
+          <Empty icon={pm ? <LuWrench /> : <LuClipboardCheck />} title={pm ? t("pmw.empty") : t("cw.empty")} body={pm ? t("pmw.emptyBody") : t("cw.emptyBody")} />
         ) : (
           <div className="table-wrap">
             <table className="table cm-tasks">
@@ -99,7 +105,8 @@ export function CalibrationWork() {
                 <tbody>
                   {list.data.items.map((x) => (
                     <tr key={x.id} className={x.overdue ? "cm-row-late" : ""}>
-                      <td className="nowrap"><Link to={`/calibration/tasks/${x.id}`} className="mono-id cell-main">{x.number}</Link></td>
+                      <td className="nowrap"><Link to={`${base}/tasks/${x.id}`} className="mono-id cell-main">{x.number}</Link>
+                        {pm && x.template_title && <div className="small subtle">{x.template_title}</div>}</td>
                       <td>
                         <div className="row" style={{ gap: 8 }}>
                           <CategoryIcon category={x.category} />
@@ -121,7 +128,8 @@ export function CalibrationWork() {
                         {x.responsible_name && x.performer === "external" && <div className="subtle">{x.responsible_name}</div>}
                       </td>
                       <td><div className="row wrap" style={{ gap: 4 }}>
-                        {closed ? <VerdictBadge verdict={x.verdict} /> : <TaskStateBadge task={x} />}
+                        {closed ? <VerdictBadge verdict={x.verdict} kind={kind} /> : <TaskStateBadge task={x} />}
+                        {!closed && list.data!.plan_gating && x.plan_status !== "approved" && x.status === "open" && <Badge>{t("pmw.notReleased")}</Badge>}
                         {closed && x.reviewed_at && <span className="small subtle">✓</span>}
                       </div></td>
                     </tr>

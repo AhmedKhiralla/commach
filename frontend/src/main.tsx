@@ -22,7 +22,8 @@ import { Assets } from "./pages/Assets";
 import { ImportPage } from "./pages/Import";
 import { Classes, Departments, Vendors } from "./pages/Lists";
 import { Locations } from "./pages/Locations";
-import { CalibrationWork } from "./pages/Calibration";
+import { CalibrationWork, MaintenanceWork } from "./pages/Calibration";
+import { PlanPage } from "./pages/Plans";
 import { ImpactPage, Impacts } from "./pages/Impacts";
 import { TaskPage } from "./pages/TaskPage";
 import { Templates } from "./pages/Templates";
@@ -51,12 +52,17 @@ function Routes() {
   const canAudit = admin || platform || me.sites.some((s) => s.roles.includes("auditor") || s.roles.includes("qa_approver"));
   if ((m = match("/assets/:id", path))) return gate(tenantUser, <AssetPage key={m.id} assetId={m.id} />);
   if ((m = match("/calibration/tasks/:id", path))) return gate(tenantUser, <TaskPage key={m.id} taskId={m.id} />);
+  if ((m = match("/maintenance/tasks/:id", path))) return gate(tenantUser, <TaskPage key={m.id} taskId={m.id} />);
+  if ((m = match("/plans/:kind", path)) && (m.kind === "calibration" || m.kind === "pm"))
+    return gate(tenantUser, <PlanPage key={m.kind} kind={m.kind} />);
   if ((m = match("/calibration/impacts/:id", path))) return gate(tenantUser, <ImpactPage key={m.id} impactId={m.id} />);
   if ((m = match("/a/:code", path))) return gate(tenantUser, <ScanCode key={m.code} code={m.code} />);
   switch (path) {
     case "/assets": return gate(tenantUser, <Assets key={window.location.search.includes("new=1") ? "new" : "list"} />);
     case "/calibration": return gate(tenantUser, <CalibrationWork />);
-    case "/calibration/templates": return gate(tenantUser, <Templates />);
+    case "/calibration/templates": return gate(tenantUser, <Templates key="cal" />);
+    case "/maintenance": return gate(tenantUser, <MaintenanceWork />);
+    case "/maintenance/templates": return gate(tenantUser, <Templates key="pm" kind="pm" />);
     case "/calibration/impacts": return gate(tenantUser, <Impacts />);
     case "/import": return gate(tenantUser, <ImportPage />);
     case "/locations": return gate(tenantUser, <Locations />);

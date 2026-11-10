@@ -149,6 +149,20 @@ class FakeAI:
                                     {"parameter": "Mass", "nominal": 200, "unit": "g", "as_found": 200.0002, "uncertainty": 0.0002},
                                     {"parameter": "Mass", "nominal": 50, "unit": "g", "as_found": 50.0001}],
                        "conformity": "The instrument complies with the stated tolerance.", "notes": ""}
+        elif "equipment maintenance manuals" in text:
+            content = {"equipment": {"manufacturer": "Fette", "model": "P1200", "description": "Rotary tablet press"},
+                       "groups": [{"title": "Monthly maintenance", "interval_value": 1, "interval_unit": "month", "est_minutes": 120,
+                                   "items": [{"item_type": "check", "parameter": "Lubricate the cam tracks", "page": "6-4"},
+                                             {"item_type": "reading", "parameter": "Hydraulic pressure", "unit": "bar",
+                                              "low_limit": "120", "high_limit": 80, "page": "6-12"},
+                                             {"item_type": "weird", "parameter": "Check punches", "page": 7},
+                                             {"item_type": "check", "parameter": ""}],
+                                   "spare_parts": [{"name": "Feeder seal kit", "part_no": "P1200-FS-01", "qty": "1", "page": "11-2"}]},
+                                  {"title": "Yearly overhaul", "interval_value": "12", "interval_unit": "month",
+                                   "items": [{"item_type": "check", "parameter": "Replace turret bearings", "page": "6-20"}],
+                                   "spare_parts": []},
+                                  {"title": "Empty", "interval_value": 1, "interval_unit": "week", "items": []}],
+                       "notes": "Hours-based intervals converted."}
         elif "impact assessment" in text:
             content = {"summary": "The balance was found out of tolerance at 100 g.", "scope": "QC balance room R-203.",
                        "products": "Review assay results weighed on the balance during the period.", "risk": "medium",

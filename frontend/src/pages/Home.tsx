@@ -111,6 +111,7 @@ function SiteCard({ site, view, groupName }: { site: TreeSite; view: View; group
         <Button size="sm" variant="ghost" onClick={() => setOpen(open.size >= all.length ? new Set() : new Set(all))}>
           {open.size >= all.length ? t("ov.collapse") : t("ov.expand")}</Button>
         {view !== "pm" && <Link className="btn sm" to={`/calibration?site_id=${site.id}`}>{t("nav.calWork")}</Link>}
+        {view !== "cal" && <Link className="btn sm" to={`/maintenance?site_id=${site.id}`}>{t("ov.pmWork")}</Link>}
         <Link className="btn sm" to={`/assets?site_id=${site.id}${view === "cal" ? "&calibration=1" : view === "pm" ? "&pm=1" : ""}`}>{t("ov.openList")}</Link>
       </div>
       <div className="cm-kpis">

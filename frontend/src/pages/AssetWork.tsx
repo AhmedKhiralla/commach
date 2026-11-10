@@ -36,7 +36,10 @@ function EndSchedule({ schedule, onClose, onDone }: { schedule: Schedule; onClos
   );
 }
 
-export function AssetCalibration({ asset, onChanged }: { asset: { id: string; code: string; site_id: string }; onChanged?: () => void }) {
+export function AssetCalibration({ asset, onChanged, kind = "calibration" }: {
+  asset: { id: string; code: string; site_id: string }; onChanged?: () => void; kind?: "calibration" | "pm";
+}) {
+  const pm = kind === "pm";
   const { t } = useI18n();
   const day = useDay();
   const ruleText = useRuleText();
@@ -46,18 +49,19 @@ export function AssetCalibration({ asset, onChanged }: { asset: { id: string; co
   const [ending, setEnding] = useState<Schedule | null>(null);
   if (w.error) return <section className="panel"><LoadError error={w.error} onRetry={w.reload} /></section>;
   if (!w.data) return <section className="panel"><div className="panel-body"><div className="skeleton" style={{ width: "50%" }} /></div></section>;
-  const cal = w.data.schedules.filter((s) => s.kind === "calibration");
+  const cal = w.data.schedules.filter((s) => s.kind === kind);
   const active = cal.filter((s) => s.active);
-  const tasks = w.data.tasks.filter((x) => x.kind === "calibration");
+  const tasks = w.data.tasks.filter((x) => x.kind === kind);
   const today = todayIso();
   const done = () => { w.reload(); onChanged?.(); };
   return (
     <div className="stack">
       <section className="panel">
-        <div className="panel-head"><h3>{t("asset.tab.calibration")}</h3><span className="spacer" />
-          {w.data.can_plan && active.length === 0 && <Button size="sm" variant="primary" icon={<LuCalendarClock />} onClick={() => setPlanning("new")}>{t("cw.plan")}</Button>}
+        <div className="panel-head"><h3>{pm ? t("asset.tab.maintenance") : t("asset.tab.calibration")}</h3><span className="spacer" />
+          {w.data.can_plan && (pm || active.length === 0) && <Button size="sm" variant="primary" icon={<LuCalendarClock />}
+            onClick={() => setPlanning("new")}>{pm ? (active.length ? t("sch.addPm") : t("pmw.plan")) : t("cw.plan")}</Button>}
         </div>
-        {cal.length === 0 ? <Empty icon={<LuCalendarClock />} title={t("sch.none")} body={t("sch.noneBody")} /> : (
+        {cal.length === 0 ? <Empty icon={<LuCalendarClock />} title={pm ? t("sch.nonePm") : t("sch.none")} body={pm ? t("sch.nonePmBody") : t("sch.noneBody")} /> : (
           <ul className="cm-scheds">
             {cal.map((s) => (
               <li key={s.id} className={s.active ? "" : "ended"}>
@@ -97,18 +101,18 @@ export function AssetCalibration({ asset, onChanged }: { asset: { id: string; co
 
       {tasks.length > 0 && (
         <section className="panel">
-          <div className="panel-head"><h3>{t("asset.tasks")}</h3></div>
+          <div className="panel-head"><h3>{pm ? t("asset.pmTasks") : t("asset.tasks")}</h3></div>
           <div className="table-wrap">
             <table className="table">
               <thead><tr><th>{t("cw.col.task")}</th><th>{t("cw.col.due")}</th><th>{t("cw.col.done")}</th><th>{t("cw.col.by")}</th><th>{t("cw.col.state")}</th></tr></thead>
               <tbody>
                 {tasks.map((x) => (
                   <tr key={x.id} className={x.overdue ? "cm-row-late" : ""}>
-                    <td><Link to={`/calibration/tasks/${x.id}`} className="mono-id cell-main">{x.number}</Link></td>
+                    <td><Link to={`/${pm ? "maintenance" : "calibration"}/tasks/${x.id}`} className="mono-id cell-main">{x.number}</Link></td>
                     <td className="nowrap"><span className="num">{day(x.due_date)}</span> <DueWhen task={x} today={today} /></td>
                     <td className="num nowrap">{day(x.performed_date)}</td>
                     <td className="small">{x.completed_by_name ?? x.vendor_name ?? x.assigned_name ?? ""}</td>
-                    <td>{x.status === "completed" ? <VerdictBadge verdict={x.verdict} /> : <TaskStateBadge task={x} />}</td>
+                    <td>{x.status === "completed" ? <VerdictBadge verdict={x.verdict} kind={kind} /> : <TaskStateBadge task={x} />}</td>
                   </tr>
                 ))}
               </tbody>
@@ -117,7 +121,7 @@ export function AssetCalibration({ asset, onChanged }: { asset: { id: string; co
         </section>
       )}
 
-      {w.data.impacts.length > 0 && (
+      {!pm && w.data.impacts.length > 0 && (
         <section className="panel">
           <div className="panel-head"><h3>{t("ia.title")}</h3></div>
           <ul className="cm-prev">
@@ -132,7 +136,7 @@ export function AssetCalibration({ asset, onChanged }: { asset: { id: string; co
         </section>
       )}
 
-      {planning && <SchedulePlanner assets={[asset]} schedule={planning === "new" ? undefined : planning} onClose={() => setPlanning(null)} onDone={done} />}
+      {planning && <SchedulePlanner kind={kind} assets={[asset]} schedule={planning === "new" ? undefined : planning} onClose={() => setPlanning(null)} onDone={done} />}
       {ending && <EndSchedule schedule={ending} onClose={() => setEnding(null)} onDone={done} />}
     </div>
   );

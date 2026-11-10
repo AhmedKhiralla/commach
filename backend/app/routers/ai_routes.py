@@ -56,3 +56,32 @@ def impact_draft(call: Call):
     if not i["can_edit"]:
         raise ApiError(403, "forbidden", "This impact assessment cannot be changed by you.")
     return run_impact(call, i)
+
+
+class ManualIn(BaseModel):
+    file_id: str
+    asset_id: str | None = None
+    class_id: str | None = None
+
+
+@endpoint(auth="tenant_user", body=ManualIn)
+def manual(call: Call):
+    """Read a maintenance manual and draft PM checklists by frequency. Each group is a suggestion the user turns into
+    a draft checklist (POST /api/templates with ai_suggestion_id), which is then approved by signature."""
+    from ..ai_tasks import run_manual
+    from .work import _can_edit_templates
+    if not _can_edit_templates(call):
+        raise ApiError(403, "forbidden", "Engineering access is required to write maintenance checklists.")
+    b: ManualIn = call.body
+    f, data = read_bytes(call, b.file_id)
+    if not (f["mime"] == "application/pdf" or f["mime"].startswith("image/")):
+        raise ApiError(422, "bad_file", "Upload the manual as a PDF (or a photo of the maintenance table).")
+    expected = ""
+    if b.asset_id:
+        a = call.tx.one("SELECT a.code, a.name_en, a.manufacturer, a.model, c.name_en AS class_name FROM assets a"
+                        " JOIN asset_classes c ON c.id = a.class_id WHERE a.id = %s::uuid", b.asset_id)
+        if a:
+            expected = f"{a['code']} {a['name_en']} ({a['class_name']}), manufacturer {a['manufacturer'] or '?'}, model {a['model'] or '?'}"
+    elif b.class_id:
+        expected = call.tx.val("SELECT name_en FROM asset_classes WHERE id = %s::uuid", b.class_id) or ""
+    return run_manual(call, f, data, expected or "not given")

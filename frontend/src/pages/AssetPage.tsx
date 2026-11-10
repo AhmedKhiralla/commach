@@ -13,7 +13,7 @@ import { AssetForm } from "./AssetForm";
 import { AssetCalibration } from "./AssetWork";
 
 const FILE_KINDS = ["photo", "nameplate", "manual", "certificate", "drawing", "other"] as const;
-type Tab = "details" | "calibration" | "components" | "files" | "history" | "ai";
+type Tab = "details" | "calibration" | "maintenance" | "components" | "files" | "history" | "ai";
 
 function Fact({ label, children }: { label: string; children: ReactNode }) {
   return <div className="cm-fact"><dt>{label}</dt><dd>{children || <span className="subtle">—</span>}</dd></div>;
@@ -93,6 +93,7 @@ export function AssetPage({ assetId }: { assetId: string }) {
   const tabs: { key: Tab; label: string; n?: number }[] = [
     { key: "details", label: t("asset.tab.details") },
     ...(a.calibration_required ? [{ key: "calibration" as Tab, label: t("asset.tab.calibration") }] : []),
+    ...(a.pm_required ? [{ key: "maintenance" as Tab, label: t("asset.tab.maintenance") }] : []),
     { key: "components", label: t("asset.tab.components"), n: a.children.length },
     { key: "files", label: t("asset.tab.files"), n: a.files.length },
     { key: "history", label: t("asset.tab.history"), n: a.history.length },
@@ -182,6 +183,7 @@ export function AssetPage({ assetId }: { assetId: string }) {
       )}
 
       {tab === "calibration" && <AssetCalibration asset={a} onChanged={reload} />}
+      {tab === "maintenance" && <AssetCalibration key="pm" kind="pm" asset={a} onChanged={reload} />}
 
       {tab === "components" && (
         <section className="panel">

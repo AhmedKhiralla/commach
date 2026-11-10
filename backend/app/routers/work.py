@@ -23,9 +23,15 @@ from ..perms import EDITORS, can_edit_site, has_any, is_admin, require_master_ed
 from .assets import TRANSITIONS, apply_status
 
 Kind = Literal["calibration", "pm"]
-PERFORMERS = {"qa_calibration_officer", "engineering_supervisor", "engineering_manager"}
-REVIEWERS = {"qa_approver", "qa_calibration_officer"}
-TEMPLATE_APPROVERS = {"qa_approver", "qa_calibration_officer"}
+PERFORMERS = {"calibration": {"qa_calibration_officer", "engineering_supervisor", "engineering_manager"},
+              "pm": {"engineering_supervisor", "engineering_manager"}}
+# a maintenance technician performs work only when it is assigned to them (by name or by role)
+REVIEWERS = {"calibration": {"qa_approver", "qa_calibration_officer"},
+             "pm": {"engineering_supervisor", "engineering_manager", "qa_approver"}}
+TEMPLATE_APPROVERS = {"calibration": {"qa_approver", "qa_calibration_officer"}, "pm": {"engineering_manager", "qa_approver"}}
+PLAN_REVIEWERS = {"engineering_supervisor", "engineering_manager"}
+PLAN_APPROVERS = {"qa_approver"}
+MEANING = {"calibration": ("calibration_completed", "calibration_reviewed"), "pm": ("pm_completed", "pm_checked")}
 
 
 def settings_of(call: Call) -> dict:
@@ -50,7 +56,21 @@ class Band(BaseModel):
     after_unit: Literal["day", "week", "month", "percent"]
 
 
+class Closure(BaseModel):
+    from_: dt.date = Field(alias="from")
+    to: dt.date | None = None
+    name: str = Field(min_length=1, max_length=120)
+
+
+class CalendarIn(BaseModel):
+    weekend: list[int] = Field(default_factory=lambda: [4], max_length=6)
+    closures: list[Closure] = Field(default_factory=list, max_length=200)
+    shift: Literal["earlier", "later"] = "earlier"
+    kinds: list[Kind] = Field(default_factory=lambda: ["pm"])
+
+
 class WorkSettingsIn(BaseModel):
+    calendar: CalendarIn | None = None
     calibration: list[Band] = Field(min_length=1, max_length=12)
     pm: list[Band] | None = Field(default=None, max_length=12)
     due_soon_days: int = Field(default=30, ge=1, le=180)
@@ -82,7 +102,17 @@ def update_work_settings(call: Call):
                 raise bad(kind, "Use 50 % of the interval or less.")
         tol[kind] = sorted(rows, key=lambda r: (r["up_to_days"] is None, r["up_to_days"] or 0))
     data = {"tolerance": {**settings_of(call)["tolerance"], **tol}, "due_soon_days": b.due_soon_days,
-            "quarantine_on_fail": b.quarantine_on_fail, "uncertainty_ratio_min": b.uncertainty_ratio_min}
+            "quarantine_on_fail": b.quarantine_on_fail, "uncertainty_ratio_min": b.uncertainty_ratio_min,
+            "calendar": settings_of(call)["calendar"]}
+    if b.calendar is not None:
+        if any(d < 0 or d > 6 for d in b.calendar.weekend):
+            raise bad("calendar", "Weekend days are 0 (Monday) to 6 (Sunday).")
+        for c in b.calendar.closures:
+            if c.to and c.to < c.from_:
+                raise bad("calendar", f"The closure {c.name} ends before it starts.")
+        data["calendar"] = {"weekend": sorted(set(b.calendar.weekend)), "shift": b.calendar.shift, "kinds": b.calendar.kinds,
+                            "closures": sorted(({"from": c.from_.isoformat(), "to": (c.to or c.from_).isoformat(), "name": c.name.strip()}
+                                                for c in b.calendar.closures), key=lambda c: c["from"])}
     call.tx.x("UPDATE tenants SET work_settings = %s::jsonb WHERE id = %s", json.dumps(data), call.tenant_id)
     setattr(call, "_work_settings", None)
     return {"settings": settings_of(call), "defaults": work.WORK_DEFAULTS}
@@ -101,9 +131,26 @@ class ItemIn(BaseModel):
     high_limit: decimal.Decimal | None = None
     required: bool = True
     notes: str | None = Field(default=None, max_length=500)
+    page_ref: str | None = Field(default=None, max_length=40)
 
 
-class TemplateIn(BaseModel):
+class SparePart(BaseModel):
+    name: str = Field(min_length=1, max_length=200)
+    part_no: str | None = Field(default=None, max_length=80)
+    qty: float | None = Field(default=None, ge=0)
+    unit: str | None = Field(default=None, max_length=20)
+    page_ref: str | None = Field(default=None, max_length=40)
+    notes: str | None = Field(default=None, max_length=300)
+
+
+class TemplateExtra(BaseModel):
+    spare_parts: list[SparePart] | None = Field(default=None, max_length=100)
+    suggested_interval_value: int | None = Field(default=None, ge=1, le=3650)
+    suggested_interval_unit: Literal["day", "week", "month", "year"] | None = None
+    est_minutes: int | None = Field(default=None, ge=1, le=100000)
+
+
+class TemplateIn(TemplateExtra):
     kind: Kind = "calibration"
     code: str
     title: str = Field(min_length=1, max_length=200)
@@ -114,10 +161,12 @@ class TemplateIn(BaseModel):
     standards_note: str | None = Field(default=None, max_length=1000)
     environment_note: str | None = Field(default=None, max_length=500)
     items: list[ItemIn] = Field(default_factory=list, max_length=200)
+    source_file_id: str | None = None
+    ai_suggestion_id: str | None = None
     _c = field_validator("code")(lambda v: code(v, upper=True))
 
 
-class TemplatePatch(BaseModel):
+class TemplatePatch(TemplateExtra):
     title: str | None = Field(default=None, min_length=1, max_length=200)
     title_ar: str | None = Field(default=None, max_length=200)
     class_id: str | None = None
@@ -137,10 +186,12 @@ class SignIn(BaseModel):
 TEMPLATE_SQL = """
 SELECT t.id, t.kind, t.code, t.version, t.title, t.title_ar, t.class_id, t.method_ref, t.description, t.standards_note,
        t.environment_note, t.status, t.based_on, t.approved_at, t.approved_by_name, t.source, t.updated_at,
+       t.spare_parts, t.suggested_interval_value, t.suggested_interval_unit, t.est_minutes, t.source_file_id,
+       t.ai_suggestion_id, f.filename AS source_filename,
        c.code AS class_code, c.name_en AS class_name_en, c.name_ar AS class_name_ar,
        (SELECT count(*) FROM template_items i WHERE i.template_id = t.id) AS item_count,
        (SELECT count(*) FROM schedules s WHERE s.template_id = t.id AND s.active) AS schedule_count
-  FROM templates t LEFT JOIN asset_classes c ON c.id = t.class_id
+  FROM templates t LEFT JOIN asset_classes c ON c.id = t.class_id LEFT JOIN files f ON f.id = t.source_file_id
 """
 
 
@@ -155,6 +206,10 @@ def _check_items(kind: str, items: list[ItemIn]) -> None:
                 raise bad(f"items.{i}.tol_plus", "Give the tolerance.")
             if it.tol_mode == "limits" and it.low_limit is None and it.high_limit is None:
                 raise bad(f"items.{i}.low_limit", "Give the lower or upper limit.")
+        if kind == "calibration" and it.item_type != "point":
+            raise bad(f"items.{i}.item_type", "Calibration templates hold calibration points.")
+        if kind == "pm" and it.item_type == "point":
+            raise bad(f"items.{i}.item_type", "Use a reading with limits in a maintenance checklist.")
         if it.low_limit is not None and it.high_limit is not None and it.low_limit > it.high_limit:
             raise bad(f"items.{i}.high_limit", "The upper limit must not be below the lower limit.")
 
@@ -163,14 +218,25 @@ def _write_items(call: Call, tid: str, items: list[ItemIn]) -> None:
     call.tx.x("DELETE FROM template_items WHERE template_id = %s::uuid", tid)
     for n, it in enumerate(items, start=1):
         tol_minus, tol_plus = it.tol_minus, it.tol_plus
+        if it.item_type != "point" and it.item_type != "reading":
+            it.tol_mode, it.nominal, tol_minus, tol_plus, it.low_limit, it.high_limit = None, None, None, None, None, None
+        elif it.item_type == "reading":
+            it.tol_mode = "limits" if (it.low_limit is not None or it.high_limit is not None) else None
+            tol_minus = tol_plus = None
         if it.tol_mode in ("abs", "pct"):
             tol_minus = tol_minus if tol_minus is not None else tol_plus
             tol_plus = tol_plus if tol_plus is not None else tol_minus
         call.tx.x("INSERT INTO template_items (tenant_id, template_id, seq, item_type, parameter, nominal, unit, tol_mode,"
-                  " tol_minus, tol_plus, low_limit, high_limit, required, notes)"
-                  " VALUES (%s, %s::uuid, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
+                  " tol_minus, tol_plus, low_limit, high_limit, required, notes, page_ref)"
+                  " VALUES (%s, %s::uuid, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
                   call.tenant_id, tid, n, it.item_type, it.parameter.strip(), it.nominal, clean(it.unit), it.tol_mode,
-                  tol_minus, tol_plus, it.low_limit, it.high_limit, it.required, clean(it.notes))
+                  tol_minus, tol_plus, it.low_limit, it.high_limit, it.required, clean(it.notes), clean(it.page_ref))
+
+
+def _extra_sql(call: Call, tid: str, data: dict) -> None:
+    if "spare_parts" in data:
+        call.tx.x("UPDATE templates SET spare_parts = %s::jsonb WHERE id = %s::uuid",
+                  json.dumps([p for p in (data.pop("spare_parts") or [])]), tid)
 
 
 def template_detail(call: Call, tid: str) -> dict:
@@ -178,7 +244,7 @@ def template_detail(call: Call, tid: str) -> dict:
     if not t:
         raise not_found("Template")
     t["items"] = call.tx.q("SELECT id, seq, item_type, parameter, nominal, unit, tol_mode, tol_minus, tol_plus, low_limit,"
-                           " high_limit, required, notes FROM template_items WHERE template_id = %s::uuid ORDER BY seq", tid)
+                           " high_limit, required, notes, page_ref FROM template_items WHERE template_id = %s::uuid ORDER BY seq", tid)
     for it in t["items"]:
         lo, hi = work.limits(it)
         it["limit_low"], it["limit_high"] = lo, hi
@@ -186,7 +252,7 @@ def template_detail(call: Call, tid: str) -> dict:
     t["versions"] = call.tx.q("SELECT id, version, status, approved_at FROM templates WHERE code = %s AND kind = %s"
                               " ORDER BY version DESC", t["code"], t["kind"])
     t["can_edit"] = t["status"] == "draft" and _can_edit_templates(call)
-    t["can_approve"] = t["status"] == "draft" and has_any(call, *TEMPLATE_APPROVERS) and len(t["items"]) > 0
+    t["can_approve"] = t["status"] == "draft" and has_any(call, *TEMPLATE_APPROVERS[t["kind"]]) and len(t["items"]) > 0
     return t
 
 
@@ -223,13 +289,30 @@ def create_template(call: Call):
     if b.class_id and not call.tx.val("SELECT 1 FROM asset_classes WHERE id = %s::uuid", b.class_id):
         raise bad("class_id", "Choose a class.")
     _check_items(b.kind, b.items)
+    if b.source_file_id and not call.tx.val("SELECT 1 FROM files WHERE id = %s::uuid", b.source_file_id):
+        raise bad("source_file_id", "Upload the manual again.")
     tid = str(call.tx.val(
         "INSERT INTO templates (tenant_id, kind, code, title, title_ar, class_id, method_ref, description, standards_note,"
-        " environment_note) VALUES (%s, %s, %s, %s, %s, %s::uuid, %s, %s, %s, %s) RETURNING id",
+        " environment_note, spare_parts, suggested_interval_value, suggested_interval_unit, est_minutes, source_file_id)"
+        " VALUES (%s, %s, %s, %s, %s, %s::uuid, %s, %s, %s, %s, %s::jsonb, %s, %s, %s, %s::uuid) RETURNING id",
         call.tenant_id, b.kind, b.code, b.title.strip(), clean(b.title_ar), b.class_id, clean(b.method_ref),
-        clean(b.description), clean(b.standards_note), clean(b.environment_note)))
+        clean(b.description), clean(b.standards_note), clean(b.environment_note),
+        json.dumps([p.model_dump() for p in b.spare_parts or []]), b.suggested_interval_value, b.suggested_interval_unit,
+        b.est_minutes, b.source_file_id))
     _write_items(call, tid, b.items)
+    if b.ai_suggestion_id:
+        from ..ai_tasks import accept_suggestion
+        t = template_detail(call, tid)
+        accept_suggestion(call, b.ai_suggestion_id, "template", tid, manual_final(t))
+        call.tx.x("UPDATE templates SET ai_suggestion_id = %s::uuid WHERE id = %s::uuid", b.ai_suggestion_id, tid)
     return template_detail(call, tid)
+
+
+def manual_final(t: dict) -> dict:
+    """The values compared with the AI draft of a manual group (see ai_tasks.run_manual)."""
+    return {"title": t["title"], "interval": f"{t['suggested_interval_value']} {t['suggested_interval_unit']}",
+            "items": [f"{i['item_type']}: {i['parameter']}" for i in t["items"]],
+            "spare_parts": [p.get("name") for p in t["spare_parts"] or []]}
 
 
 @endpoint(auth="tenant_user", body=TemplatePatch)
@@ -245,10 +328,11 @@ def update_template(call: Call):
     b: TemplatePatch = call.body
     data = b.model_dump(exclude_unset=True)
     items = data.pop("items", None)
+    _extra_sql(call, tid, data)
     if "class_id" in data:
         call.tx.x("UPDATE templates SET class_id = %s::uuid WHERE id = %s::uuid", data.pop("class_id"), tid)
-    patch_sql(call, "templates", tid, {k: (clean(v) if k != "title" else v.strip()) for k, v in data.items()
-                                        if k != "title" or v})
+    patch_sql(call, "templates", tid, {k: ((clean(v) if k != "title" else v.strip()) if isinstance(v, str) else v)
+                                        for k, v in data.items() if k != "title" or v})
     if items is not None:
         its = [ItemIn(**i) for i in items]
         _check_items(t["kind"], its)
@@ -262,8 +346,9 @@ def approve_template(call: Call):
     t = template_detail(call, tid)
     if t["status"] != "draft":
         raise ApiError(409, "approved", "This version is already approved.")
-    if not has_any(call, *TEMPLATE_APPROVERS):
-        raise ApiError(403, "forbidden", "Only a QA approver or the QA calibration officer can approve templates.")
+    if not has_any(call, *TEMPLATE_APPROVERS[t["kind"]]):
+        raise ApiError(403, "forbidden", "Only a QA approver or the QA calibration officer can approve calibration templates."
+                       if t["kind"] == "calibration" else "Only the engineering manager or a QA approver can approve maintenance checklists.")
     if not t["items"]:
         raise ApiError(422, "empty", "Add the points before approving the template.")
     b: SignIn = call.body
@@ -272,8 +357,10 @@ def approve_template(call: Call):
                                  meaning="template_approved")
     rhash = esign.record_hash({"template": {k: t[k] for k in ("id", "code", "version", "title", "method_ref")},
                                "items": [{k: it[k] for k in ("seq", "item_type", "parameter", "nominal", "unit", "tol_mode",
-                                                              "tol_minus", "tol_plus", "low_limit", "high_limit")}
-                                         for it in t["items"]]})
+                                                              "tol_minus", "tol_plus", "low_limit", "high_limit", "required")}
+                                         for it in t["items"]],
+                               "spare_parts": t["spare_parts"],
+                               "interval": [t["suggested_interval_value"], t["suggested_interval_unit"]]})
     sig = esign.record(call, signer=signer, entity="template", record_id=tid, label=label, meaning="template_approved",
                        rhash=rhash, reason=b.reason)
     old = call.tx.q("SELECT id FROM templates WHERE code = %s AND kind = %s AND status = 'approved'", t["code"], t["kind"])
@@ -297,11 +384,13 @@ def new_version(call: Call):
     v = call.tx.val("SELECT max(version) FROM templates WHERE code = %s AND kind = %s", t["code"], t["kind"]) + 1
     nid = str(call.tx.val(
         "INSERT INTO templates (tenant_id, kind, code, version, title, title_ar, class_id, method_ref, description,"
-        " standards_note, environment_note, based_on) SELECT tenant_id, kind, code, %s, title, title_ar, class_id,"
-        " method_ref, description, standards_note, environment_note, id FROM templates WHERE id = %s RETURNING id", v, t["id"]))
+        " standards_note, environment_note, based_on, spare_parts, suggested_interval_value, suggested_interval_unit,"
+        " est_minutes, source_file_id) SELECT tenant_id, kind, code, %s, title, title_ar, class_id,"
+        " method_ref, description, standards_note, environment_note, id, spare_parts, suggested_interval_value,"
+        " suggested_interval_unit, est_minutes, source_file_id FROM templates WHERE id = %s RETURNING id", v, t["id"]))
     call.tx.x("INSERT INTO template_items (tenant_id, template_id, seq, item_type, parameter, nominal, unit, tol_mode,"
-              " tol_minus, tol_plus, low_limit, high_limit, required, notes) SELECT tenant_id, %s::uuid, seq, item_type,"
-              " parameter, nominal, unit, tol_mode, tol_minus, tol_plus, low_limit, high_limit, required, notes"
+              " tol_minus, tol_plus, low_limit, high_limit, required, notes, page_ref) SELECT tenant_id, %s::uuid, seq, item_type,"
+              " parameter, nominal, unit, tol_mode, tol_minus, tol_plus, low_limit, high_limit, required, notes, page_ref"
               " FROM template_items WHERE template_id = %s", nid, t["id"])
     return template_detail(call, nid)
 
@@ -388,7 +477,8 @@ def _validate_schedule(call: Call, data: dict, kind: str) -> None:
 
 
 def create_task(call: Call, s: dict, due: dt.date) -> dict:
-    """The open task for a schedule's next due date."""
+    """The open task for a schedule's next due date (moved off weekends and closures by the working calendar)."""
+    due = work.working_day(due, settings_of(call), s["kind"])
     start, end = work.window(due, _schedule_dict(s), settings_of(call))
     prefix = "CAL" if s["kind"] == "calibration" else "PM"
     number = call.tx.val("SELECT cm_next_number(%s::uuid, %s, 4)", call.tenant_id, prefix)
@@ -429,7 +519,8 @@ def create_schedules(call: Call):
         if a["status"] in ("retired", "disposed", "transferred"):
             skipped.append({"code": a["code"], "reason": "retired"})
             continue
-        if call.tx.val("SELECT 1 FROM schedules WHERE asset_id = %s AND kind = %s AND active", a["id"], b.kind):
+        if call.tx.val("SELECT 1 FROM schedules WHERE asset_id = %s AND kind = %s AND active"
+                       " AND (kind = 'calibration' OR template_id IS NOT DISTINCT FROM %s::uuid)", a["id"], b.kind, b.template_id):
             skipped.append({"code": a["code"], "reason": "exists"})
             continue
         first = b.first_due or (work.add_interval(b.last_done, b.interval_value, b.interval_unit) if b.last_done else t0)
@@ -484,7 +575,7 @@ def update_schedule(call: Call):
     # carry the change into the open task that has not started yet
     t = call.tx.one("SELECT * FROM tasks WHERE schedule_id = %s AND status = 'open' ORDER BY due_date LIMIT 1", sid)
     if t:
-        due = nd or t["due_date"]
+        due = work.working_day(nd or s["next_due"] or t["due_date"], settings_of(call), s["kind"])
         start, end = work.window(due, _schedule_dict(s), settings_of(call))
         call.tx.x("UPDATE tasks SET due_date = %s, window_start = %s, window_end = %s, template_id = %s, performer = %s,"
                   " vendor_id = %s, responsible_user_id = %s, assignee_user_ids = %s::uuid[], assignee_roles = %s::text[],"
@@ -539,8 +630,12 @@ SELECT t.id, t.number, t.kind, t.site_id, t.asset_id, t.schedule_id, t.due_date,
        (t.status NOT IN ('completed', 'cancelled') AND t.window_end < %s) AS overdue,
        a.code AS asset_code, a.name_en AS asset_name_en, a.name_ar AS asset_name_ar, a.status AS asset_status,
        a.gmp_criticality, s.code AS site_code, l.code AS location_code, c.category,
-       v.name AS vendor_name, au.full_name AS assigned_name, ru.full_name AS responsible_name
+       v.name AS vendor_name, au.full_name AS assigned_name, ru.full_name AS responsible_name,
+       tp.code AS template_code, tp.title AS template_title,
+       (SELECT p.status FROM plans p WHERE p.site_id = t.site_id AND p.kind = t.kind
+         AND p.year = extract(year FROM t.due_date)::int) AS plan_status
   FROM tasks t JOIN assets a ON a.id = t.asset_id JOIN sites s ON s.id = t.site_id
+  LEFT JOIN templates tp ON tp.id = t.template_id
   JOIN asset_classes c ON c.id = a.class_id LEFT JOIN locations l ON l.id = a.location_id
   LEFT JOIN vendors v ON v.id = t.vendor_id LEFT JOIN users au ON au.id = t.assigned_user_id
   LEFT JOIN users ru ON ru.id = t.responsible_user_id
@@ -623,7 +718,8 @@ def list_tasks(call: Call):
     impacts_open = call.tx.val("SELECT count(*) FROM impact_assessments WHERE status = 'draft'"
                                + (" AND site_id = ANY(%s::uuid[])" if sites is not None else ""), *([sites] if sites is not None else []))
     return {"items": rows, "total": total, "page": page, "counts": {**counts, "impacts_open": impacts_open},
-            "today": t0, "due_soon_days": settings_of(call)["due_soon_days"]}
+            "today": t0, "due_soon_days": settings_of(call)["due_soon_days"],
+            "plan_gating": features(call).get("plan_approval", True)}
 
 
 def _task(call: Call, tid: str) -> dict:
@@ -643,7 +739,23 @@ def _is_assignee(call: Call, t: dict) -> bool:
 
 def can_perform(call: Call, t: dict) -> bool:
     roles = site_roles(call, str(t["site_id"]))
-    return bool(roles & PERFORMERS) or ("maintenance_technician" in roles and _is_assignee(call, t))
+    return bool(roles & PERFORMERS[t["kind"]]) or ("maintenance_technician" in roles and _is_assignee(call, t))
+
+
+def plan_status(call: Call, t: dict) -> str | None:
+    return call.tx.val("SELECT status FROM plans WHERE site_id = %s AND kind = %s AND year = %s",
+                       t["site_id"], t["kind"], t["due_date"].year)
+
+
+def released(call: Call, t: dict) -> bool:
+    """With plan approval switched on, work is released when QA has approved the site's plan for the year it is due."""
+    return not features(call).get("plan_approval", True) or plan_status(call, t) == "approved"
+
+
+def _require_released(call: Call, t: dict) -> None:
+    if not released(call, t):
+        raise ApiError(409, "not_released", f"The {t['due_date'].year} {'calibration' if t['kind'] == 'calibration' else 'maintenance'}"
+                       " plan of this site is not approved yet, so this task is not released.")
 
 
 def needs_acceptance(call: Call, t: dict) -> bool:
@@ -670,9 +782,16 @@ def task_detail(call: Call, tid: str) -> dict:
         results = [{"id": None, "item_id": it["id"], "seq": it["seq"], "item_type": it["item_type"], "parameter": it["parameter"],
                     "nominal": it["nominal"], "unit": it["unit"], "low_limit": it["limit_low"], "high_limit": it["limit_high"],
                     "as_found": None, "as_left": None, "uncertainty": None, "value_text": None, "ok_found": None,
-                    "ok_left": None, "notes": None} for it in t["template"]["items"]]
+                    "ok_left": None, "notes": None, "file_id": None, "required": it["required"], "page_ref": it["page_ref"],
+                    "item_notes": it["notes"]} for it in t["template"]["items"]]
+    elif results and t["template"]:
+        info = {str(it["id"]): it for it in t["template"]["items"]}
+        for r in results:
+            it = info.get(str(r["item_id"] or ""))
+            r["page_ref"], r["item_notes"] = (it["page_ref"], it["notes"]) if it else (None, None)
     t["results"] = results
-    t["verdict_preview"] = work.verdict(results) if results else None
+    t["verdict_preview"] = (work.verdict(results) if t["kind"] == "calibration" else work.pm_verdict(results)) if results else None
+    t["parts"] = call.tx.q("SELECT id, name, part_no, qty, unit, notes FROM task_parts WHERE task_id = %s::uuid ORDER BY created_at", tid)
     t["standards"] = call.tx.q("SELECT * FROM task_standards WHERE task_id = %s::uuid ORDER BY created_at", tid)
     t["standard_options"] = standard_options(call, str(t["site_id"]), t0)
     t["certificate"] = call.tx.one("SELECT id, filename, mime, sha256, page_count, created_at FROM files WHERE id = %s",
@@ -690,16 +809,18 @@ def task_detail(call: Call, tid: str) -> dict:
     open_ = t["status"] not in ("completed", "cancelled")
     perform = can_perform(call, full)
     roles = site_roles(call, str(t["site_id"]))
+    t["released"] = released(call, full) or t["status"] in ("in_progress", "at_vendor")
+    rel = t["released"]
     t["perms"] = {
-        "accept": open_ and needs_acceptance(call, full) and (perform or _is_assignee(call, full)),
-        "edit": open_ and perform and not needs_acceptance(call, full),
-        "complete": open_ and perform and not needs_acceptance(call, full),
-        "send": open_ and t["performer"] == "external" and t["status"] != "at_vendor" and perform
-                and "out_for_calibration" in TRANSITIONS.get(t["asset"]["status"], ()),
+        "accept": open_ and rel and needs_acceptance(call, full) and (perform or _is_assignee(call, full)),
+        "edit": open_ and rel and perform and not needs_acceptance(call, full),
+        "complete": open_ and rel and perform and not needs_acceptance(call, full),
+        "send": open_ and rel and t["performer"] == "external" and t["status"] != "at_vendor" and perform
+                and t["kind"] == "calibration" and "out_for_calibration" in TRANSITIONS.get(t["asset"]["status"], ()),
         "review": (t["status"] == "completed" and t["reviewed_at"] is None and t["source"] == "normal"
-                   and bool(roles & REVIEWERS) and str(full["completed_by"] or "") != str(call.user["id"])),
+                   and bool(roles & REVIEWERS[t["kind"]]) and str(full["completed_by"] or "") != str(call.user["id"])),
         "cancel": open_ and can_edit_site(call, str(t["site_id"])),
-        "ai": open_ and perform,
+        "ai": open_ and rel and perform and t["kind"] == "calibration",
     }
     t["needs_acceptance"] = open_ and needs_acceptance(call, full)
     return t
@@ -734,6 +855,7 @@ def accept_task(call: Call):
         raise ApiError(409, "accepted", f"This task was already accepted by {t['accepted_by_name']}.")
     if not (can_perform(call, t) or _is_assignee(call, t)):
         raise ApiError(403, "forbidden", "This task is not assigned to you.")
+    _require_released(call, t)
     call.tx.x("UPDATE tasks SET accepted_at = now(), accepted_by_name = %s, assigned_user_id = %s WHERE id = %s",
               call.user["full_name"], call.user["id"], t["id"])
     return task_detail(call, str(t["id"]))
@@ -750,6 +872,7 @@ def send_to_vendor(call: Call):
         raise ApiError(409, "not_external", "Only an open external calibration can be sent to the vendor.")
     if not can_perform(call, t):
         raise ApiError(403, "forbidden", "The QA calibration officer or an engineering supervisor sends assets to the vendor.")
+    _require_released(call, t)
     a = call.tx.one("SELECT * FROM assets WHERE id = %s", t["asset_id"])
     if "out_for_calibration" not in TRANSITIONS[a["status"]]:
         raise ApiError(422, "status_not_allowed", "This asset cannot be sent out from its current status.")
@@ -778,8 +901,18 @@ class ResultIn(BaseModel):
     as_found: decimal.Decimal | None = None
     as_left: decimal.Decimal | None = None
     uncertainty: decimal.Decimal | None = Field(default=None, ge=0)
-    value_text: str | None = Field(default=None, max_length=500)
+    value_text: str | None = Field(default=None, max_length=2000)
     notes: str | None = Field(default=None, max_length=500)
+    file_id: str | None = None
+    required: bool = True
+
+
+class PartIn(BaseModel):
+    name: str = Field(min_length=1, max_length=200)
+    part_no: str | None = Field(default=None, max_length=80)
+    qty: decimal.Decimal = Field(default=decimal.Decimal(1), gt=0)
+    unit: str | None = Field(default=None, max_length=20)
+    notes: str | None = Field(default=None, max_length=300)
 
 
 class StandardIn(BaseModel):
@@ -799,6 +932,8 @@ class ResultsIn(BaseModel):
     remarks: str | None = Field(default=None, max_length=4000)
     results: list[ResultIn] = Field(default_factory=list, max_length=300)
     standards: list[StandardIn] = Field(default_factory=list, max_length=30)
+    parts: list[PartIn] = Field(default_factory=list, max_length=100)
+    man_hours: decimal.Decimal | None = Field(default=None, ge=0, le=10000)
 
 
 def _require_editable(call: Call, t: dict) -> None:
@@ -806,6 +941,7 @@ def _require_editable(call: Call, t: dict) -> None:
         raise ApiError(409, "closed", "This task is closed.")
     if not can_perform(call, t):
         raise ApiError(403, "forbidden", "This task is not assigned to you.")
+    _require_released(call, t)
     if needs_acceptance(call, t):
         raise ApiError(409, "not_accepted", "Accept the task before recording results.")
 
@@ -819,23 +955,34 @@ def save_results(call: Call, t: dict, b: ResultsIn) -> None:
     items = {str(i["id"]): i for i in call.tx.q("SELECT * FROM template_items WHERE template_id = %s", t["template_id"])} \
         if t["template_id"] else {}
     call.tx.x("UPDATE tasks SET performed_date = %s, performed_by_name = %s, certificate_no = %s, certificate_file_id = %s::uuid,"
-              " env_temperature = %s, env_humidity = %s, remarks = %s,"
+              " env_temperature = %s, env_humidity = %s, remarks = %s, man_hours = %s,"
               " status = CASE WHEN status = 'open' THEN 'in_progress' ELSE status END WHERE id = %s::uuid",
               b.performed_date, clean(b.performed_by_name), clean(b.certificate_no), b.certificate_file_id,
-              clean(b.env_temperature), clean(b.env_humidity), clean(b.remarks), tid)
+              clean(b.env_temperature), clean(b.env_humidity), clean(b.remarks), b.man_hours, tid)
     call.tx.x("DELETE FROM task_results WHERE task_id = %s::uuid", tid)
     for n, r in enumerate(b.results, start=1):
         item = items.get(r.item_id or "")
         lo, hi = work.limits(item) if item else (r.low_limit, r.high_limit)
         nominal = item["nominal"] if item else r.nominal
+        itype = item["item_type"] if item else r.item_type
+        value = clean(r.value_text)
+        if itype == "check" and value not in (None, "ok", "not_ok", "na"):
+            raise bad(f"results.{n - 1}.value_text", "Answer OK, not OK or not applicable.")
+        if r.file_id and not call.tx.val("SELECT 1 FROM files WHERE id = %s::uuid", r.file_id):
+            raise bad(f"results.{n - 1}.file_id", "Upload the photo again.")
+        ok = (value == "ok" if value in ("ok", "not_ok") else None) if itype == "check" else work.within(r.as_found, lo, hi)
         call.tx.x("INSERT INTO task_results (tenant_id, task_id, item_id, seq, item_type, parameter, nominal, unit, low_limit,"
-                  " high_limit, as_found, as_left, uncertainty, value_text, ok_found, ok_left, notes)"
-                  " VALUES (%s, %s::uuid, %s::uuid, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
-                  call.tenant_id, tid, item["id"] if item else None, n, item["item_type"] if item else r.item_type,
+                  " high_limit, as_found, as_left, uncertainty, value_text, ok_found, ok_left, notes, file_id, required)"
+                  " VALUES (%s, %s::uuid, %s::uuid, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s::uuid, %s)",
+                  call.tenant_id, tid, item["id"] if item else None, n, itype,
                   item["parameter"] if item else r.parameter.strip(), nominal, (item or {}).get("unit") or clean(r.unit),
-                  lo, hi, r.as_found, r.as_left, r.uncertainty, clean(r.value_text),
-                  work.within(r.as_found, lo, hi), work.within(r.as_left, lo, hi) if r.as_left is not None else None,
-                  clean(r.notes))
+                  lo, hi, r.as_found, r.as_left, r.uncertainty, value, ok,
+                  work.within(r.as_left, lo, hi) if r.as_left is not None else None,
+                  clean(r.notes), r.file_id, item["required"] if item else r.required)
+    call.tx.x("DELETE FROM task_parts WHERE task_id = %s::uuid", tid)
+    for p in b.parts:
+        call.tx.x("INSERT INTO task_parts (tenant_id, task_id, name, part_no, qty, unit, notes) VALUES (%s, %s::uuid, %s, %s, %s, %s, %s)",
+                  call.tenant_id, tid, p.name.strip(), clean(p.part_no), p.qty, clean(p.unit), clean(p.notes))
     call.tx.x("DELETE FROM task_standards WHERE task_id = %s::uuid", tid)
     for s in b.standards:
         desc, valid = clean(s.description), s.valid_until
@@ -876,13 +1023,19 @@ def complete_task(call: Call):
     if not t["performed_date"]:
         problems.append("performed_date")
     points = [r for r in results if r["item_type"] == "point"]
-    if t["kind"] == "calibration" and not points:
+    cal = t["kind"] == "calibration"
+    if cal and not points:
         problems.append("results")
     if any(r["as_found"] is None for r in points):
         problems.append("as_found")
+    if not cal:
+        if not results:
+            problems.append("checklist")
+        elif work.pm_verdict(results) is None:
+            problems.append("checklist_open")
     if t["certificate_required"] and not t["certificate_file_id"]:
         problems.append("certificate")
-    if t["performer"] == "external" and not t["certificate_no"]:
+    if cal and t["performer"] == "external" and not t["certificate_no"]:
         problems.append("certificate_no")
     standards = call.tx.q("SELECT ts.*, a.status AS std_status, a.code AS std_code FROM task_standards ts"
                           " LEFT JOIN assets a ON a.id = ts.standard_asset_id WHERE ts.task_id = %s::uuid", tid)
@@ -894,18 +1047,20 @@ def complete_task(call: Call):
             problems.append(f"standard_invalid:{s['std_code']}")
     if problems:
         raise ApiError(422, "incomplete", "The record is not complete yet.", extra={"problems": problems})
-    v = work.verdict(results) if points else "pass"
+    v = (work.verdict(results) if points else "pass") if cal else work.pm_verdict(results)
     a = call.tx.one("SELECT * FROM assets WHERE id = %s", t["asset_id"])
-    signer = esign.verify_signer(call, b.email, b.password, entity="task", record_id=tid, label=t["number"],
-                                 meaning="calibration_completed")
+    meaning = MEANING[t["kind"]][0]
+    parts = call.tx.q("SELECT name, part_no, qty, unit FROM task_parts WHERE task_id = %s::uuid ORDER BY created_at", tid)
+    signer = esign.verify_signer(call, b.email, b.password, entity="task", record_id=tid, label=t["number"], meaning=meaning)
     rhash = esign.record_hash({
         "task": {k: t[k] for k in ("id", "number", "asset_id", "due_date", "performed_date", "performed_by_name",
-                                   "certificate_no", "certificate_file_id", "env_temperature", "env_humidity")},
+                                   "certificate_no", "certificate_file_id", "env_temperature", "env_humidity", "man_hours")},
         "results": [{k: r[k] for k in ("seq", "parameter", "nominal", "unit", "low_limit", "high_limit", "as_found", "as_left",
-                                       "uncertainty", "ok_found", "ok_left")} for r in results],
+                                       "uncertainty", "value_text", "file_id", "ok_found", "ok_left")} for r in results],
+        "parts": parts,
         "standards": [{k: s[k] for k in ("description", "cert_ref", "valid_until")} for s in standards],
         "verdict": v})
-    sig = esign.record(call, signer=signer, entity="task", record_id=tid, label=t["number"], meaning="calibration_completed",
+    sig = esign.record(call, signer=signer, entity="task", record_id=tid, label=t["number"], meaning=meaning,
                        rhash=rhash, reason=b.reason)
     if b.ai_suggestion_id:
         from ..ai_tasks import accept_suggestion
@@ -916,7 +1071,7 @@ def complete_task(call: Call):
               sig["id"], tid)
     # asset status follows the result, under the same signature
     st = settings_of(call)
-    if v == "fail" and st["quarantine_on_fail"] and "quarantined" in TRANSITIONS[a["status"]]:
+    if cal and v == "fail" and st["quarantine_on_fail"] and "quarantined" in TRANSITIONS[a["status"]]:
         apply_status(call, a, "quarantined", f"Calibration {t['number']} out of tolerance", f"Out of tolerance ({t['number']})", sig["id"])
     elif a["status"] == "out_for_calibration":
         apply_status(call, a, "in_service", f"Returned from calibration {t['number']}", None, sig["id"])
@@ -925,11 +1080,11 @@ def complete_task(call: Call):
     if t["schedule_id"]:
         s = call.tx.one("SELECT * FROM schedules WHERE id = %s", t["schedule_id"])
         if s and s["active"]:
-            due = work.next_due(s, t["performed_date"], t["due_date"])
+            due = work.next_due(s, t["performed_date"], s["next_due"] or t["due_date"])
             call.tx.x("UPDATE schedules SET last_done = %s, next_due = %s WHERE id = %s", t["performed_date"], due, s["id"])
             nxt = create_task(call, s, due)
     impact = None
-    if work.is_oot(v):
+    if cal and work.is_oot(v):
         impact = open_impact(call, t, a)
     out = task_detail(call, tid)
     out["next_task"] = nxt
@@ -960,16 +1115,17 @@ def review_task(call: Call):
     t = _task(call, call.path["task_id"])
     if t["status"] != "completed" or t["reviewed_at"] or t["source"] != "normal":
         raise ApiError(409, "not_reviewable", "This task cannot be reviewed.")
-    if not site_roles(call, str(t["site_id"])) & REVIEWERS:
-        raise ApiError(403, "forbidden", "Only a QA approver or the QA calibration officer reviews calibrations.")
+    if not site_roles(call, str(t["site_id"])) & REVIEWERS[t["kind"]]:
+        raise ApiError(403, "forbidden", "Only a QA approver or the QA calibration officer reviews calibrations." if t["kind"] == "calibration"
+                       else "An engineering supervisor, the engineering manager or a QA approver checks maintenance.")
     if str(t["completed_by"]) == str(call.user["id"]):
         raise ApiError(403, "four_eyes", "The person who completed the calibration cannot review it.")
     b: SignIn = call.body
     signer = esign.verify_signer(call, b.email, b.password, entity="task", record_id=str(t["id"]), label=t["number"],
-                                 meaning="calibration_reviewed")
+                                 meaning=MEANING[t["kind"]][1])
     completion = call.tx.val("SELECT record_hash FROM signatures WHERE id = %s", t["signature_id"])
     sig = esign.record(call, signer=signer, entity="task", record_id=str(t["id"]), label=t["number"],
-                       meaning="calibration_reviewed", rhash=esign.record_hash({"completion": completion, "task": t["number"]}),
+                       meaning=MEANING[t["kind"]][1], rhash=esign.record_hash({"completion": completion, "task": t["number"]}),
                        reason=b.reason)
     call.tx.x("UPDATE tasks SET reviewed_at = now(), reviewed_by_name = %s, review_signature_id = %s WHERE id = %s",
               call.user["full_name"], sig["id"], t["id"])
@@ -1000,7 +1156,7 @@ def cancel_task(call: Call):
     if t["schedule_id"]:
         s = call.tx.one("SELECT * FROM schedules WHERE id = %s", t["schedule_id"])
         if s and s["active"]:
-            due = work.add_interval(t["due_date"], s["interval_value"], s["interval_unit"])
+            due = work.add_interval(s["next_due"] or t["due_date"], s["interval_value"], s["interval_unit"])
             call.tx.x("UPDATE schedules SET next_due = %s WHERE id = %s", due, s["id"])
             nxt = create_task(call, s, due)
     out = task_detail(call, str(t["id"]))
@@ -1049,7 +1205,7 @@ def impact_detail(call: Call, iid: str) -> dict:
     i["ai"] = call.tx.one("SELECT id, model, status, changed_fields, reviewed_by_name FROM ai_suggestions WHERE id = %s",
                           i["ai_suggestion_id"]) if i["ai_suggestion_id"] else None
     roles = site_roles(call, str(i["site_id"]))
-    i["can_edit"] = i["status"] == "draft" and bool(roles & (REVIEWERS | EDITORS)) or (i["status"] == "draft" and is_admin(call))
+    i["can_edit"] = i["status"] == "draft" and bool(roles & (REVIEWERS["calibration"] | EDITORS)) or (i["status"] == "draft" and is_admin(call))
     i["can_approve"] = i["status"] == "draft" and "qa_approver" in roles
     return i
 
@@ -1107,3 +1263,163 @@ def approve_impact(call: Call):
     call.tx.x("UPDATE impact_assessments SET status = 'approved', approved_signature_id = %s, approved_at = now(),"
               " approved_by_name = %s WHERE id = %s", sig["id"], call.user["full_name"], i["id"])
     return impact_detail(call, str(i["id"]))
+
+
+# ================================================================== annual plans
+class PlanSignIn(SignIn):
+    site_id: str
+    kind: Kind
+    year: int = Field(ge=2000, le=2100)
+
+
+def plan_content(call: Call, site_id: str, kind: str, year: int) -> dict:
+    """The year's work of a site: done and open tasks, plus the due dates the active schedules will create."""
+    st = settings_of(call)
+    t0 = today(call)
+    tasks = call.tx.q(
+        "SELECT t.id, t.number, t.schedule_id, t.asset_id, t.due_date, t.window_end, t.status, t.verdict, t.performed_date,"
+        " t.created_at, (t.status NOT IN ('completed', 'cancelled') AND t.window_end < %s) AS overdue"
+        " FROM tasks t WHERE t.site_id = %s::uuid AND t.kind = %s AND t.status <> 'cancelled'"
+        " AND extract(year FROM t.due_date)::int = %s ORDER BY t.due_date", t0, site_id, kind, year)
+    schedules = call.tx.q(SCHEDULE_SQL + " WHERE s.site_id = %s::uuid AND s.kind = %s"
+                          " AND (s.active OR s.id IN (SELECT schedule_id FROM tasks WHERE site_id = %s::uuid AND kind = %s"
+                          " AND extract(year FROM due_date)::int = %s))", site_id, kind, site_id, kind, year)
+    assets = {str(a["id"]): a for a in call.tx.q(
+        "SELECT a.id, a.code, a.name_en, a.name_ar, l.code AS location_code FROM assets a LEFT JOIN locations l ON l.id = a.location_id"
+        " WHERE a.id IN (SELECT asset_id FROM schedules WHERE site_id = %s::uuid AND kind = %s"
+        " UNION SELECT asset_id FROM tasks WHERE site_id = %s::uuid AND kind = %s)", site_id, kind, site_id, kind)}
+    rows: dict[str, dict] = {}
+    for s in schedules:
+        a = assets.get(str(s["asset_id"]))
+        if not a:
+            continue
+        rows[str(s["id"])] = {"schedule_id": s["id"], "asset_id": a["id"], "asset_code": a["code"], "asset_name_en": a["name_en"],
+                              "asset_name_ar": a["name_ar"], "location_code": a["location_code"], "active": s["active"],
+                              "interval_value": s["interval_value"], "interval_unit": s["interval_unit"],
+                              "template_code": s["template_code"], "template_title": s["template_title"],
+                              "performer": s["performer"], "vendor_name": s["vendor_name"], "entries": []}
+        if s["active"] and s["next_due"]:
+            d, i = s["next_due"], 0
+            while d.year <= year and i < 800:
+                i += 1
+                d = work.add_interval(s["next_due"], i * s["interval_value"], s["interval_unit"]) \
+                    if s["interval_unit"] in ("month", "year") else d + dt.timedelta(days=work.interval_days(s["interval_value"], s["interval_unit"]))
+                due = work.working_day(d, st, kind)
+                if due.year == year:
+                    rows[str(s["id"])]["entries"].append({"due_date": due, "status": "planned"})
+    for t in tasks:
+        key = str(t["schedule_id"] or f"x-{t['asset_id']}")
+        if key not in rows:
+            a = assets.get(str(t["asset_id"]), {})
+            rows[key] = {"schedule_id": t["schedule_id"], "asset_id": t["asset_id"], "asset_code": a.get("code"),
+                         "asset_name_en": a.get("name_en"), "asset_name_ar": a.get("name_ar"), "location_code": a.get("location_code"),
+                         "active": False, "interval_value": None, "interval_unit": None, "template_code": None,
+                         "template_title": None, "performer": None, "vendor_name": None, "entries": []}
+        rows[key]["entries"].append({"task_id": t["id"], "number": t["number"], "due_date": t["due_date"], "status": t["status"],
+                                     "verdict": t["verdict"], "performed_date": t["performed_date"], "overdue": t["overdue"],
+                                     "created_at": t["created_at"]})
+    out = [r for r in rows.values() if r["entries"]]
+    for r in out:
+        r["entries"].sort(key=lambda e: e["due_date"])
+    out.sort(key=lambda r: (r["asset_code"] or "", r["template_code"] or ""))
+    digest = esign.record_hash({"site": site_id, "kind": kind, "year": year,
+                                "rows": [[r["asset_code"], str(r["schedule_id"]), [str(e["due_date"]) for e in r["entries"]]] for r in out]})
+    return {"rows": out, "hash": digest, "count": sum(len(r["entries"]) for r in out)}
+
+
+def _plan(call: Call, site_id: str, kind: str, year: int) -> dict | None:
+    return call.tx.one("SELECT * FROM plans WHERE site_id = %s::uuid AND kind = %s AND year = %s", site_id, kind, year)
+
+
+def plan_view(call: Call, site_id: str, kind: str, year: int) -> dict:
+    require_site(call, site_id)
+    p = _plan(call, site_id, kind, year)
+    c = plan_content(call, site_id, kind, year)
+    roles = site_roles(call, site_id)
+    status = p["status"] if p else "draft"
+    if p:
+        p["reviewed_signature"] = call.tx.one("SELECT user_name, user_email, signed_at, statement, record_hash FROM signatures WHERE id = %s",
+                                              p["reviewed_signature_id"]) if p["reviewed_signature_id"] else None
+        p["approved_signature"] = call.tx.one("SELECT user_name, user_email, signed_at, statement, record_hash FROM signatures WHERE id = %s",
+                                              p["approved_signature_id"]) if p["approved_signature_id"] else None
+    changed = bool(p and p["content_hash"] and p["content_hash"] != c["hash"])
+    return {"plan": p, "status": status, "rows": c["rows"], "count": c["count"], "hash": c["hash"], "changed_since_signed": changed,
+            "gating": features(call).get("plan_approval", True),
+            "can_review": status != "approved" and bool(roles & PLAN_REVIEWERS) and c["count"] > 0,
+            "can_approve": status == "reviewed" and bool(roles & PLAN_APPROVERS) and not changed,
+            "site_id": site_id, "kind": kind, "year": year}
+
+
+def _plan_args(call: Call) -> tuple[str, str, int]:
+    q = call.query
+    site_id = q.get("site_id") or ""
+    if not site_id:
+        raise bad("site_id", "Choose a site.")
+    kind = q.get("kind", "calibration")
+    if kind not in ("calibration", "pm"):
+        raise bad("kind", "Choose calibration or maintenance.")
+    try:
+        year = int(q.get("year") or today(call).year)
+    except ValueError:
+        raise bad("year", "Give the year.")
+    return site_id, kind, year
+
+
+@endpoint(auth="tenant_user")
+def get_plan(call: Call):
+    return plan_view(call, *_plan_args(call))
+
+
+@endpoint(auth="tenant_user", body=PlanSignIn)
+def review_plan(call: Call):
+    b: PlanSignIn = call.body
+    v = plan_view(call, b.site_id, b.kind, b.year)
+    if not v["can_review"]:
+        raise ApiError(403, "forbidden", "An engineering supervisor or the engineering manager of the site reviews the plan,"
+                       " once it holds work and before QA approves it.")
+    site = call.tx.val("SELECT code FROM sites WHERE id = %s::uuid", b.site_id)
+    label = f"{site} {b.kind} plan {b.year}"
+    p = v["plan"] or call.tx.one("INSERT INTO plans (tenant_id, site_id, kind, year) VALUES (%s, %s::uuid, %s, %s) RETURNING *",
+                                 call.tenant_id, b.site_id, b.kind, b.year)
+    signer = esign.verify_signer(call, b.email, b.password, entity="plan", record_id=str(p["id"]), label=label, meaning="plan_reviewed")
+    sig = esign.record(call, signer=signer, entity="plan", record_id=str(p["id"]), label=label, meaning="plan_reviewed",
+                       rhash=v["hash"], reason=b.reason)
+    call.tx.x("UPDATE plans SET status = 'reviewed', reviewed_signature_id = %s, reviewed_at = now(), reviewed_by_name = %s,"
+              " content_hash = %s, task_count = %s WHERE id = %s", sig["id"], call.user["full_name"], v["hash"], v["count"], p["id"])
+    return plan_view(call, b.site_id, b.kind, b.year)
+
+
+@endpoint(auth="tenant_user", body=PlanSignIn)
+def approve_plan(call: Call):
+    b: PlanSignIn = call.body
+    v = plan_view(call, b.site_id, b.kind, b.year)
+    if v["changed_since_signed"]:
+        raise ApiError(409, "plan_changed", "The plan changed after its review. It must be reviewed again before QA approves it.")
+    if not v["can_approve"]:
+        raise ApiError(403, "forbidden", "A QA approver of the site approves the plan after the supervisor's review.")
+    p = v["plan"]
+    if p["reviewed_signature_id"] and str(call.tx.val("SELECT user_id FROM signatures WHERE id = %s", p["reviewed_signature_id"])) \
+            == str(call.user["id"]):
+        raise ApiError(403, "four_eyes", "The person who reviewed the plan cannot also approve it.")
+    site = call.tx.val("SELECT code FROM sites WHERE id = %s::uuid", b.site_id)
+    label = f"{site} {b.kind} plan {b.year}"
+    signer = esign.verify_signer(call, b.email, b.password, entity="plan", record_id=str(p["id"]), label=label, meaning="plan_approved")
+    sig = esign.record(call, signer=signer, entity="plan", record_id=str(p["id"]), label=label, meaning="plan_approved",
+                       rhash=v["hash"], reason=b.reason)
+    call.tx.x("UPDATE plans SET status = 'approved', approved_signature_id = %s, approved_at = now(), approved_by_name = %s"
+              " WHERE id = %s", sig["id"], call.user["full_name"], p["id"])
+    return plan_view(call, b.site_id, b.kind, b.year)
+
+
+@endpoint(auth="tenant_user")
+def plan_pdf(call: Call):
+    from starlette.responses import Response
+    from .plan_pdf import render
+    v = plan_view(call, *_plan_args(call))
+    site = call.tx.one("SELECT code, name FROM sites WHERE id = %s::uuid", v["site_id"])
+    company = call.tx.val("SELECT name FROM tenants WHERE id = %s", call.tenant_id) or ""
+    pdf = render(v, site, company, today(call))
+    call.tx.event("EXPORT", "plans", str(v["plan"]["id"]) if v["plan"] else None,
+                  f"{site['code']} {v['kind']} {v['year']}", {"format": "pdf", "document": "annual plan", "status": v["status"], "hash": v["hash"]})
+    return Response(pdf, media_type="application/pdf",
+                    headers={"Content-Disposition": f'inline; filename="commach-{v["kind"]}-plan-{site["code"]}-{v["year"]}.pdf"'})

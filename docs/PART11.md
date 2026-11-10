@@ -44,6 +44,20 @@ values, and **every field the person corrected** (AI value → final value). The
 
 Evidence: `tests/test_calibration.py`.
 
+### Maintenance records and annual plans (Phase 3)
+
+- A PM job is completed only with the **Done by** signature (`pm_completed`); its hash covers the record, every checklist
+  answer, reading, photo file and remark, and the spare parts used. **Checked by** (`pm_checked`) is a second person.
+- PM checklists follow the same approval and versioning rules as calibration templates.
+- An annual plan is reviewed (`plan_reviewed`) and approved (`plan_approved`) by two different people. Each signature
+  carries the SHA-256 of the plan content (every schedule and due date of the year). If the plan changes after the
+  review, QA cannot approve it until it is reviewed again. An approved plan cannot be changed (database trigger).
+- With plan approval switched on, a task cannot be accepted, worked or completed before its year's plan is approved.
+- Manual AI drafts are suggestions like the other AI functions; the checklist created from one records which
+  suggestion it came from, and the corrections made.
+
+Evidence: `tests/test_maintenance.py`.
+
 ## Subpart C — Electronic signatures
 
 | Clause | Requirement | How ComMach meets it | Evidence |

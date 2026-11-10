@@ -43,8 +43,13 @@ TOLERANCE_DEFAULTS: dict[str, list[dict]] = {
     ],
 }
 
+# Working calendar: due dates of the chosen kinds never fall on a weekend day or a closure (holidays, shutdowns,
+# Ramadan if the site does no planned maintenance then). weekend uses Python weekdays: Monday 0 ... Friday 4, Saturday 5.
+CALENDAR_DEFAULTS = {"weekend": [4], "closures": [], "shift": "earlier", "kinds": ["pm"]}
+
 WORK_DEFAULTS = {
     "tolerance": TOLERANCE_DEFAULTS,
+    "calendar": CALENDAR_DEFAULTS,
     "due_soon_days": 30,           # "due soon" on the overview and work lists
     "quarantine_on_fail": True,    # a failed calibration quarantines the asset with the completion signature
     "uncertainty_ratio_min": 4,    # test uncertainty ratio expected on certificates (warning below it)
@@ -52,9 +57,12 @@ WORK_DEFAULTS = {
 
 
 def effective_settings(stored: dict | None) -> dict:
-    out = {**WORK_DEFAULTS, "tolerance": {k: [dict(b) for b in v] for k, v in TOLERANCE_DEFAULTS.items()}}
+    out = {**WORK_DEFAULTS, "tolerance": {k: [dict(b) for b in v] for k, v in TOLERANCE_DEFAULTS.items()},
+           "calendar": dict(CALENDAR_DEFAULTS)}
     for k, v in (stored or {}).items():
-        if k == "tolerance" and isinstance(v, dict):
+        if k == "calendar" and isinstance(v, dict):
+            out["calendar"] = {**CALENDAR_DEFAULTS, **{x: v[x] for x in CALENDAR_DEFAULTS if x in v}}
+        elif k == "tolerance" and isinstance(v, dict):
             for kind in ("calibration", "pm"):
                 if isinstance(v.get(kind), list) and v[kind]:
                     out["tolerance"][kind] = v[kind]
@@ -116,6 +124,27 @@ def rule_for(schedule: dict, settings: dict) -> dict:
     return rule
 
 
+def _closed(d: dt.date, cal: dict) -> bool:
+    if d.weekday() in (cal.get("weekend") or []):
+        return True
+    iso = d.isoformat()
+    return any(str(c.get("from", "")) <= iso <= str(c.get("to") or c.get("from", "")) for c in cal.get("closures") or [])
+
+
+def working_day(d: dt.date, settings: dict, kind: str) -> dt.date:
+    """Move a due date off weekends and closures (earlier by default), for the kinds the calendar applies to."""
+    cal = settings.get("calendar") or CALENDAR_DEFAULTS
+    if kind not in (cal.get("kinds") or []):
+        return d
+    step = dt.timedelta(days=-1 if cal.get("shift", "earlier") == "earlier" else 1)
+    x = d
+    for _ in range(120):
+        if not _closed(x, cal):
+            return x
+        x += step
+    return d
+
+
 def window(due: dt.date, schedule: dict, settings: dict) -> tuple[dt.date | None, dt.date]:
     rule = rule_for(schedule, settings)
     idays = interval_days(schedule["interval_value"], schedule["interval_unit"])
@@ -133,8 +162,9 @@ def preview(schedule: dict, settings: dict, first_due: dt.date, n: int = 12) -> 
     """The next n due dates with their windows (floating schedules assume each is done on its due date)."""
     out, due = [], first_due
     for _ in range(n):
-        s, e = window(due, schedule, settings)
-        out.append({"due": due, "window_start": s, "window_end": e})
+        d = working_day(due, settings, schedule.get("kind", "calibration"))
+        s, e = window(d, schedule, settings)
+        out.append({"due": d, "window_start": s, "window_end": e, "moved_from": due if d != due else None})
         due = add_interval(due, schedule["interval_value"], schedule["interval_unit"])
     return out
 
@@ -175,6 +205,30 @@ def verdict(results: list[dict]) -> str | None:
         return "pass"
     left = [r.get("ok_left") if r.get("as_left") is not None else r["ok_found"] for r in points]
     return "adjusted" if all(left) else "fail"
+
+
+def pm_verdict(results: list[dict]) -> str | None:
+    """PM: pass (every check OK, every reading within its limits) or fail (findings). None while a required item is open."""
+    findings = False
+    for r in results:
+        t = r["item_type"]
+        if t == "check":
+            if r.get("value_text") not in ("ok", "not_ok", "na"):
+                if r.get("required", True):
+                    return None
+                continue
+            findings |= r["value_text"] == "not_ok"
+        elif t in ("reading", "point"):
+            if r.get("as_found") is None:
+                if r.get("required", True):
+                    return None
+                continue
+            findings |= r.get("ok_found") is False
+        elif t == "text" and r.get("required", True) and not (r.get("value_text") or "").strip():
+            return None
+        elif t == "photo" and r.get("required", True) and not r.get("file_id"):
+            return None
+    return "fail" if findings else "pass"
 
 
 def is_oot(v: str | None) -> bool:

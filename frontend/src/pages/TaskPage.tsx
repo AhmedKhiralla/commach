@@ -17,11 +17,13 @@ import { Link, navigate } from "../lib/router";
 import { useSession } from "../lib/session";
 import type { StringKey } from "../lib/strings";
 import { nameOf, type AssetStatus, type Category } from "../lib/types";
+import { PmChecklist, PmParts, type Part } from "./PmChecklist";
 
 interface Result {
   id: string | null; item_id: string | null; seq: number; item_type: string; parameter: string; nominal: number | null;
   unit: string | null; low_limit: number | null; high_limit: number | null; as_found: number | null; as_left: number | null;
   uncertainty: number | null; value_text: string | null; ok_found: boolean | null; ok_left: boolean | null; notes: string | null;
+  file_id?: string | null; required?: boolean; page_ref?: string | null; item_notes?: string | null;
 }
 interface Standard { id?: string; standard_asset_id: string | null; description: string | null; cert_ref: string | null; valid_until: string | null }
 interface StdOption { id: string; code: string; name_en: string; name_ar: string | null; status: AssetStatus; valid_until: string | null; last_certificate: string | null; usable: boolean }
@@ -30,13 +32,15 @@ interface FileMeta { id: string; filename: string; mime: string; sha256: string;
 interface Task extends TaskRow {
   accepted_by_name: string | null; sent_at: string | null; performed_by_name: string | null; certificate_no: string | null;
   certificate_file_id: string | null; env_temperature: string | null; env_humidity: string | null; remarks: string | null;
-  cancel_reason: string | null; reviewed_by_name: string | null; template_id: string | null;
+  cancel_reason: string | null; reviewed_by_name: string | null; template_id: string | null; man_hours: number | null;
+  released: boolean; plan_status: string | null; parts: Part[];
   asset: { id: string; code: string; name_en: string; name_ar: string | null; status: AssetStatus; serial_no: string | null;
     manufacturer: string | null; model: string | null; range_min: number | null; range_max: number | null; unit: string | null;
     resolution: string | null; accuracy: string | null; class_name_en: string; class_name_ar: string | null; category: Category };
   schedule: (Schedule & { rule?: unknown }) | null;
   template: { id: string; code: string; version: number; title: string; method_ref: string | null; standards_note: string | null;
-    environment_note: string | null; status: string } | null;
+    environment_note: string | null; status: string; est_minutes?: number | null;
+    spare_parts?: { name: string; part_no: string | null; qty: number | null; unit: string | null }[] } | null;
   results: Result[]; verdict_preview: Verdict | null; standards: Standard[]; standard_options: StdOption[];
   certificate: FileMeta | null; previous: { id: string; number: string; performed_date: string; verdict: Verdict; completed_by_name: string }[];
   signature: Sig | null; review_signature: Sig | null; impact: { id: string; number: string; status: string } | null;
@@ -52,14 +56,15 @@ interface CertOut {
   extra_readings: unknown[]; checks: CertCheck[];
 }
 
-type Row = { [K in "parameter" | "nominal" | "unit" | "low_limit" | "high_limit" | "as_found" | "as_left" | "uncertainty" | "notes"]: string }
-  & { item_id: string | null; item_type: string; seq: number; fixed: boolean };
+export type Row = { [K in "parameter" | "nominal" | "unit" | "low_limit" | "high_limit" | "as_found" | "as_left" | "uncertainty" | "notes" | "value_text"]: string }
+  & { item_id: string | null; item_type: string; seq: number; fixed: boolean; file_id: string | null; required: boolean;
+      page_ref: string | null; item_notes: string | null };
 
 const s = (v: unknown) => (v === null || v === undefined ? "" : String(v));
 const n = (v: string) => (v.trim() === "" ? null : Number(v.replace(",", ".")));
 const okNum = (v: string) => v.trim() === "" || Number.isFinite(Number(v.replace(",", ".")));
 
-function inLimits(v: string, lo: string, hi: string): boolean | null {
+export function inLimits(v: string, lo: string, hi: string): boolean | null {
   const x = n(v);
   if (x === null || !Number.isFinite(x)) return null;
   const l = n(lo), h = n(hi);
@@ -80,10 +85,26 @@ function toRows(results: Result[]): Row[] {
   return results.map((r) => ({
     item_id: r.item_id, item_type: r.item_type, seq: r.seq, fixed: !!r.item_id, parameter: r.parameter, nominal: s(r.nominal), unit: s(r.unit),
     low_limit: s(r.low_limit), high_limit: s(r.high_limit), as_found: s(r.as_found), as_left: s(r.as_left), uncertainty: s(r.uncertainty), notes: s(r.notes),
+    value_text: s(r.value_text), file_id: r.file_id ?? null, required: r.required ?? true, page_ref: r.page_ref ?? null, item_notes: r.item_notes ?? null,
   }));
 }
 
-function InOut({ ok }: { ok: boolean | null }) {
+export function pmVerdictOf(rows: Row[]): Verdict | null {
+  let findings = false;
+  for (const r of rows) {
+    if (r.item_type === "check") {
+      if (!["ok", "not_ok", "na"].includes(r.value_text)) { if (r.required) return null; continue; }
+      findings ||= r.value_text === "not_ok";
+    } else if (r.item_type === "reading") {
+      if (r.as_found.trim() === "") { if (r.required) return null; continue; }
+      findings ||= inLimits(r.as_found, r.low_limit, r.high_limit) === false;
+    } else if (r.item_type === "text" && r.required && !r.value_text.trim()) return null;
+    else if (r.item_type === "photo" && r.required && !r.file_id) return null;
+  }
+  return rows.length ? (findings ? "fail" : "pass") : null;
+}
+
+export function InOut({ ok }: { ok: boolean | null }) {
   const { t } = useI18n();
   if (ok === null) return <span className="subtle">–</span>;
   return ok ? <span className="cm-in"><LuCircleCheck aria-hidden />{t("task.r.in")}</span> : <span className="cm-out"><LuCircleX aria-hidden />{t("task.r.out")}</span>;
@@ -110,7 +131,8 @@ export function TaskPage({ taskId }: { taskId: string }) {
   const { data: task, error, reload, setData } = useLoad(() => get<Task>(`/api/tasks/${taskId}`), [taskId]);
   const [rows, setRows] = useState<Row[]>([]);
   const [stds, setStds] = useState<Standard[]>([]);
-  const [rec, setRec] = useState({ performed_date: "", performed_by_name: "", certificate_no: "", env_temperature: "", env_humidity: "", remarks: "" });
+  const [rec, setRec] = useState({ performed_date: "", performed_by_name: "", certificate_no: "", env_temperature: "", env_humidity: "", remarks: "", man_hours: "" });
+  const [parts, setParts] = useState<Part[]>([]);
   const [cert, setCert] = useState<FileMeta | null>(null);
   const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -126,7 +148,9 @@ export function TaskPage({ taskId }: { taskId: string }) {
     setRows(toRows(x.results));
     setStds(x.standards.map((y) => ({ standard_asset_id: y.standard_asset_id, description: y.description, cert_ref: y.cert_ref, valid_until: y.valid_until })));
     setRec({ performed_date: s(x.performed_date), performed_by_name: s(x.performed_by_name) || (x.performer === "internal" ? me?.user.full_name ?? "" : ""),
-      certificate_no: s(x.certificate_no), env_temperature: s(x.env_temperature), env_humidity: s(x.env_humidity), remarks: s(x.remarks) });
+      certificate_no: s(x.certificate_no), env_temperature: s(x.env_temperature), env_humidity: s(x.env_humidity), remarks: s(x.remarks),
+      man_hours: s(x.man_hours) });
+    setParts((x.parts ?? []).map((p) => ({ name: p.name, part_no: s(p.part_no), qty: s(p.qty), unit: s(p.unit), notes: s(p.notes) })));
     setCert(x.certificate);
     setDirty(false);
   };
@@ -143,7 +167,8 @@ export function TaskPage({ taskId }: { taskId: string }) {
     return () => { live = false; if (url) URL.revokeObjectURL(url); };
   }, [cert?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const verdict = useMemo(() => verdictOf(rows), [rows]);
+  const isPm = task?.kind === "pm";
+  const verdict = useMemo(() => (isPm ? pmVerdictOf(rows) : verdictOf(rows)), [rows, isPm]);
   if (error) return <div className="panel"><LoadError error={error} onRetry={reload} /></div>;
   if (!task) return <div className="panel"><div className="panel-body"><div className="skeleton" style={{ width: "40%" }} /></div></div>;
   const x = task;
@@ -154,12 +179,15 @@ export function TaskPage({ taskId }: { taskId: string }) {
   const body = () => ({
     performed_date: rec.performed_date || null, performed_by_name: rec.performed_by_name || null, certificate_no: rec.certificate_no || null,
     certificate_file_id: cert?.id ?? null, env_temperature: rec.env_temperature || null, env_humidity: rec.env_humidity || null,
-    remarks: rec.remarks || null,
+    remarks: rec.remarks || null, man_hours: n(rec.man_hours),
     results: rows.map((r) => ({ item_id: r.item_id, item_type: r.item_type, parameter: r.parameter || "?", nominal: n(r.nominal), unit: r.unit || null,
-      low_limit: n(r.low_limit), high_limit: n(r.high_limit), as_found: n(r.as_found), as_left: n(r.as_left), uncertainty: n(r.uncertainty), notes: r.notes || null })),
+      low_limit: n(r.low_limit), high_limit: n(r.high_limit), as_found: n(r.as_found), as_left: n(r.as_left), uncertainty: n(r.uncertainty), notes: r.notes || null,
+      value_text: r.value_text || null, file_id: r.file_id, required: r.required })),
     standards: stds.filter((y) => y.standard_asset_id || y.description),
+    parts: parts.filter((p) => p.name.trim()).map((p) => ({ name: p.name.trim(), part_no: p.part_no || null, qty: n(p.qty) ?? 1, unit: p.unit || null, notes: p.notes || null })),
   });
-  const valid = rows.every((r) => okNum(r.as_found) && okNum(r.as_left) && okNum(r.uncertainty) && okNum(r.nominal) && okNum(r.low_limit) && okNum(r.high_limit));
+  const valid = rows.every((r) => okNum(r.as_found) && okNum(r.as_left) && okNum(r.uncertainty) && okNum(r.nominal) && okNum(r.low_limit) && okNum(r.high_limit))
+    && okNum(rec.man_hours) && parts.every((p) => okNum(p.qty));
   const save = async (quiet = false) => {
     setSaving(true); setErr(null);
     try { const out = await put<Task>(`/api/tasks/${x.id}/results`, body()); setData(out); if (!quiet) toast(t("task.saved")); return out; }
@@ -198,6 +226,7 @@ export function TaskPage({ taskId }: { taskId: string }) {
       as_left?: number | null; error?: number | null; uncertainty?: number | null }[]);
     if (rows.length === 0 && extra.length) {
       setRows(extra.map((r, i) => ({ item_id: null, item_type: "point", seq: i + 1, fixed: false, parameter: r.parameter || x.asset.class_name_en,
+        value_text: "", file_id: null, required: true, page_ref: null, item_notes: null,
         nominal: s(r.nominal), unit: s(r.unit), low_limit: "", high_limit: "",
         as_found: s(r.as_found ?? (r.nominal != null && r.error != null ? r.nominal + r.error : null)), as_left: s(r.as_left),
         uncertainty: s(r.uncertainty), notes: "" })));
@@ -218,11 +247,14 @@ export function TaskPage({ taskId }: { taskId: string }) {
     if (dirty) await save(true);
     const out = await post<Task>(`/api/tasks/${x.id}/complete`, { ...v, reason: v.reason || null, ai_suggestion_id: aiApplied });
     setData(out); setAi(null);
-    toast(t("task.signed", { name: me?.user.full_name ?? "" }));
+    toast(isPm ? t("pmt.signedDone", { name: me?.user.full_name ?? "" }) : t("task.signed", { name: me?.user.full_name ?? "" }));
     if (out.impact_created) toast(t("task.impactNew", { number: out.impact_created.number }));
   };
 
   const name = nameOf(x.asset, lang);
+  const vk = (v: string) => (isPm ? `verdict.pm.${v}` : `verdict.${v}`) as StringKey;
+  const L = isPm ? { complete: t("pmt.complete"), review: t("pmt.review"), back: t("pmt.back") } : { complete: t("task.complete"), review: t("task.review"), back: t("task.back") };
+  const base = isPm ? "/maintenance" : "/calibration";
   const lo = (r: Row) => r.low_limit, hi = (r: Row) => r.high_limit;
   const usedStd = new Set(stds.map((y) => y.standard_asset_id).filter(Boolean));
   const checkMsg = (c: CertCheck) => {
@@ -242,13 +274,13 @@ export function TaskPage({ taskId }: { taskId: string }) {
 
   return (
     <>
-      <Link to="/calibration" className="back-link"><LuArrowLeft className="flip-rtl" aria-hidden /> {t("task.back")}</Link>
+      <Link to={base} className="back-link"><LuArrowLeft className="flip-rtl" aria-hidden /> {L.back}</Link>
       <div className="page-head cm-task-head">
         <div className="titles">
           <div className="row wrap" style={{ gap: 8 }}>
             <span className="mono-id cm-code">{x.number}</span>
             <TaskStateBadge task={x} />
-            {x.status === "completed" && <VerdictBadge verdict={x.verdict} />}
+            {x.status === "completed" && <VerdictBadge verdict={x.verdict} kind={x.kind} />}
             {x.source === "demo" && <Badge>{t("task.demo")}</Badge>}
           </div>
           <h1><Link to={`/assets/${x.asset_id}`} className="mono-id">{x.asset.code}</Link> · {name}</h1>
@@ -276,21 +308,23 @@ export function TaskPage({ taskId }: { taskId: string }) {
             <Button icon={<LuSparkles />} busy={busy === "ai"} onClick={readCert}>{busy === "ai" ? t("task.readingCert") : t("task.readCert")}</Button>
           )}
           {edit && <Button icon={<LuSave />} busy={saving} disabled={!dirty || !valid} onClick={() => save().catch(() => {})}>{t("task.save")}</Button>}
-          {x.perms.complete && <Button variant="primary" icon={<LuSignature />} disabled={!valid} onClick={() => setDialog("complete")}>{t("task.complete")}</Button>}
-          {x.perms.review && <Button variant="primary" icon={<LuSignature />} onClick={() => setDialog("review")}>{t("task.review")}</Button>}
+          {x.perms.complete && <Button variant="primary" icon={<LuSignature />} disabled={!valid} onClick={() => setDialog("complete")}>{L.complete}</Button>}
+          {x.perms.review && <Button variant="primary" icon={<LuSignature />} onClick={() => setDialog("review")}>{L.review}</Button>}
           {x.perms.cancel && x.status !== "at_vendor" && <Button variant="ghost" icon={<LuX />} onClick={() => setDialog("cancel")}>{t("task.cancel")}</Button>}
         </div>
       </div>
 
       {err && <Notice tone="danger">{err}</Notice>}
-      {x.needs_acceptance && <Notice>{t("task.acceptHint")}</Notice>}
-      {x.overdue && <Notice tone="danger">{t("task.overdueNotice", { date: day(x.window_end) })}</Notice>}
+      {!x.released && !closed && <Notice tone="warn">{t(isPm ? "pmt.notReleased" : "pmt.notReleasedCal", { year: x.due_date.slice(0, 4) })}{" "}
+        <Link to={`/plans/${x.kind}?year=${x.due_date.slice(0, 4)}&site_id=${x.site_id}`}>{t("pmt.openPlan")}</Link></Notice>}
+      {x.released && x.needs_acceptance && <Notice>{t("task.acceptHint")}</Notice>}
+      {x.overdue && !isPm && <Notice tone="danger">{t("task.overdueNotice", { date: day(x.window_end) })}</Notice>}
       {x.accepted_by_name && !closed && <p className="small muted">{t("task.accepted", { name: x.accepted_by_name })}</p>}
       {x.status === "cancelled" && <Notice>{t("task.cancelled", { reason: x.cancel_reason ?? "" })}</Notice>}
       {x.impact && <Notice tone={x.impact.status === "approved" ? "ok" : "warn"}>
         <Link to={`/calibration/impacts/${x.impact.id}`}>{t("task.impact", { number: x.impact.number })}</Link> · {t(`ia.status.${x.impact.status}` as StringKey)}
       </Notice>}
-      {x.next_task && <Notice tone="ok">{t("task.nextCreated", { date: day(x.next_task.due_date), number: x.next_task.number })}</Notice>}
+      {x.next_task && <Notice tone="ok">{t(isPm ? "pmt.nextCreated" : "task.nextCreated", { date: day(x.next_task.due_date), number: x.next_task.number })}</Notice>}
 
       <div className="cm-task-grid">
         <div className="stack">
@@ -300,7 +334,9 @@ export function TaskPage({ taskId }: { taskId: string }) {
               <div className="grid-3">
                 <TextField label={t("task.performed_date")} type="date" max={today} value={rec.performed_date} onChange={(v) => setR("performed_date", v)} disabled={!edit} />
                 <TextField label={t("task.performed_by")} value={rec.performed_by_name} onChange={(v) => setR("performed_by_name", v)} disabled={!edit} maxLength={160} />
-                <TextField label={t("task.certificate_no")} value={rec.certificate_no} onChange={(v) => setR("certificate_no", v)} disabled={!edit} maxLength={120} />
+                {isPm && <TextField label={t("pmt.manHours")} inputMode="decimal" dir="ltr" value={rec.man_hours} onChange={(v) => setR("man_hours", v)} disabled={!edit}
+                  error={okNum(rec.man_hours) ? undefined : " "} hint={x.template?.est_minutes ? t("pmt.est", { n: x.template.est_minutes }) : undefined} />}
+                {!isPm && <><TextField label={t("task.certificate_no")} value={rec.certificate_no} onChange={(v) => setR("certificate_no", v)} disabled={!edit} maxLength={120} />
                 <TextField label={t("task.env_temperature")} value={rec.env_temperature} onChange={(v) => setR("env_temperature", v)} disabled={!edit} maxLength={40} placeholder={t("task.envTempPh")} />
                 <TextField label={t("task.env_humidity")} value={rec.env_humidity} onChange={(v) => setR("env_humidity", v)} disabled={!edit} maxLength={40} placeholder={t("task.envHumPh")} />
                 <div className="field">
@@ -312,7 +348,7 @@ export function TaskPage({ taskId }: { taskId: string }) {
                   </div>
                   <input ref={fileRef} type="file" hidden accept="application/pdf,image/*" capture="environment"
                     onChange={(e) => { const f = e.target.files?.[0]; if (f) uploadCert(f); e.target.value = ""; }} />
-                </div>
+                </div></>}
               </div>
               <div className="field" style={{ marginTop: 14 }}>
                 <label htmlFor="task-remarks">{t("task.remarks")}</label>
@@ -321,12 +357,17 @@ export function TaskPage({ taskId }: { taskId: string }) {
             </div>
           </section>
 
+          {isPm ? <>
+            <PmChecklist rows={rows} edit={edit} template={x.template} onChange={(r) => { setRows(r); setDirty(true); }} />
+            <PmParts parts={parts} edit={edit} suggested={x.template?.spare_parts ?? []} onChange={(p) => { setParts(p); setDirty(true); }} />
+          </> : <>
           <section className="panel">
             <div className="panel-head"><h3>{t("task.readings")}</h3>
               {x.template && <span className="small muted">{x.template.code} v{x.template.version}{x.template.method_ref ? ` · ${x.template.method_ref}` : ""}</span>}
               <span className="spacer" />
               {edit && <Button size="sm" icon={<LuPlus />} onClick={() => { setRows((r) => [...r, { item_id: null, item_type: "point", seq: (r.at(-1)?.seq ?? 0) + 1, fixed: false,
-                parameter: "", nominal: "", unit: r.at(-1)?.unit ?? x.asset.unit ?? "", low_limit: "", high_limit: "", as_found: "", as_left: "", uncertainty: "", notes: "" }]); setDirty(true); }}>{t("task.r.add")}</Button>}
+                parameter: "", nominal: "", unit: r.at(-1)?.unit ?? x.asset.unit ?? "", low_limit: "", high_limit: "", as_found: "", as_left: "", uncertainty: "", notes: "",
+                value_text: "", file_id: null, required: true, page_ref: null, item_notes: null }]); setDirty(true); }}>{t("task.r.add")}</Button>}
             </div>
             {rows.length === 0 ? (
               <div className="panel-body">{edit ? <Notice>{t("task.r.noTemplate")}</Notice> : <span className="muted">—</span>}</div>
@@ -422,17 +463,18 @@ export function TaskPage({ taskId }: { taskId: string }) {
               </ul>
             )}
           </section>
+          </>}
         </div>
 
         <aside className="stack">
-          <section className={`panel cm-verdict ${(x.status === "completed" ? x.verdict : verdict) ?? "none"}`}>
+          <section className={`panel cm-verdict ${isPm && (x.status === "completed" ? x.verdict : verdict) === "fail" ? "adjusted" : (x.status === "completed" ? x.verdict : verdict) ?? "none"}`}>
             <div className="panel-body">
               <span className="small muted">{t("task.verdict")}</span>
               {(x.status === "completed" ? x.verdict : verdict)
-                ? <strong className="v">{t(`verdict.${x.status === "completed" ? x.verdict : verdict}` as StringKey)}</strong>
+                ? <strong className="v">{t(vk((x.status === "completed" ? x.verdict : verdict) as string))}</strong>
                 : <span className="subtle">{t("task.verdictPending")}</span>}
-              {x.signature && <SigLine sig={x.signature} label={t("task.signed", { name: x.signature.user_name })} />}
-              {x.review_signature && <SigLine sig={x.review_signature} label={t("task.reviewed", { name: x.review_signature.user_name })} />}
+              {x.signature && <SigLine sig={x.signature} label={isPm ? t("pmt.signedDone", { name: x.signature.user_name }) : t("task.signed", { name: x.signature.user_name })} />}
+              {x.review_signature && <SigLine sig={x.review_signature} label={isPm ? t("pmt.signedChecked", { name: x.review_signature.user_name }) : t("task.reviewed", { name: x.review_signature.user_name })} />}
               {x.ai && <p className="small subtle"><LuSparkles aria-hidden /> {x.ai.model}{x.ai.changed_fields && Object.keys(x.ai.changed_fields).length
                 ? ` · ${t("asset.ai.changed", { fields: Object.keys(x.ai.changed_fields).join(", ") })}` : ` · ${t("asset.ai.unchanged")}`}</p>}
             </div>
@@ -476,14 +518,14 @@ export function TaskPage({ taskId }: { taskId: string }) {
           )}
 
           <section className="panel">
-            <div className="panel-head"><h3>{t("task.previous")}</h3></div>
+            <div className="panel-head"><h3>{isPm ? t("pmt.previous") : t("task.previous")}</h3></div>
             {x.previous.length === 0 ? <div className="panel-body small subtle">{t("task.noPrevious")}</div> : (
               <ul className="cm-prev">
                 {x.previous.map((p) => (
                   <li key={p.id}>
-                    <Link to={`/calibration/tasks/${p.id}`} className="mono-id">{p.number}</Link>
+                    <Link to={`${base}/tasks/${p.id}`} className="mono-id">{p.number}</Link>
                     <span className="num small">{day(p.performed_date)}</span>
-                    <VerdictBadge verdict={p.verdict} />
+                    <VerdictBadge verdict={p.verdict} kind={x.kind} />
                   </li>
                 ))}
               </ul>
@@ -493,9 +535,9 @@ export function TaskPage({ taskId }: { taskId: string }) {
       </div>
 
       {dialog === "complete" && (
-        <SignDialog title={`${t("task.complete")} · ${x.number}`} meaning="calibration_completed" onClose={() => setDialog(null)} onSign={complete}>
-          <div className={`cm-verdict-line ${verdict ?? ""}`}>{t("task.verdict")}: <strong>{verdict ? t(`verdict.${verdict}` as StringKey) : t("task.verdictPending")}</strong></div>
-          {verdict === "fail" && <Notice tone="danger">{t("task.failNotice")}</Notice>}
+        <SignDialog title={`${L.complete} · ${x.number}`} meaning={isPm ? "pm_completed" : "calibration_completed"} onClose={() => setDialog(null)} onSign={complete}>
+          <div className={`cm-verdict-line ${verdict ?? ""}`}>{t("task.verdict")}: <strong>{verdict ? t(vk(verdict)) : t("task.verdictPending")}</strong></div>
+          {verdict === "fail" && <Notice tone={isPm ? "warn" : "danger"}>{isPm ? t("pmt.findingsNotice") : t("task.failNotice")}</Notice>}
           {verdict === "adjusted" && <Notice tone="warn">{t("task.adjNotice")}</Notice>}
           {aiApplied && <p className="small muted"><LuSparkles aria-hidden /> {t("task.aiRecorded")}</p>}
         </SignDialog>
@@ -505,14 +547,14 @@ export function TaskPage({ taskId }: { taskId: string }) {
           onSign={async (v) => { setData(await post<Task>(`/api/tasks/${x.id}/send`, { ...v, reason: v.reason || null })); toast(t("task.sentToast")); }} />
       )}
       {dialog === "review" && (
-        <SignDialog title={`${t("task.review")} · ${x.number}`} meaning="calibration_reviewed" onClose={() => setDialog(null)}
+        <SignDialog title={`${L.review} · ${x.number}`} meaning={isPm ? "pm_checked" : "calibration_reviewed"} onClose={() => setDialog(null)}
           onSign={async (v) => { setData(await post<Task>(`/api/tasks/${x.id}/review`, { ...v, reason: v.reason || null })); }} />
       )}
       {dialog === "cancel" && (
         <SignDialog title={`${t("task.cancel")} · ${x.number}`} meaning="task_cancelled" reasonRequired danger submitLabel={t("task.cancel")}
           onClose={() => setDialog(null)} onSign={async (v) => {
             const out = await post<Task>(`/api/tasks/${x.id}/cancel`, v);
-            if (out.next_task) { toast(t("task.nextCreated", { date: day(out.next_task.due_date), number: out.next_task.number })); navigate(`/calibration/tasks/${out.next_task.id}`); }
+            if (out.next_task) { toast(t("task.nextCreated", { date: day(out.next_task.due_date), number: out.next_task.number })); navigate(`${base}/tasks/${out.next_task.id}`); }
             else setData(out);
           }} />
       )}

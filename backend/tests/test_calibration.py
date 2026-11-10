@@ -26,6 +26,8 @@ def sign(client, email, pw, **extra):
 def lab(server, two_companies):
     nile = two_companies["NILE"]
     admin, site = nile["admin"], nile["site"]
+    # these tests cover the task flow; plan approval (on by default) is covered in test_maintenance.py
+    assert admin.put("/api/settings/features", {"features": {"plan_approval": False}})[0] == 200
     cal = user(server, admin, "cal@nile.test", "Cal Officer", ["qa_calibration_officer"], site["id"], PW["cal"])
     qa = user(server, admin, "qa2@nile.test", "QA Two", ["qa_approver"], site["id"], PW["qa2"])
     sup = user(server, admin, "sup@nile.test", "Eng Supervisor", ["engineering_supervisor", "engineering_manager"], site["id"], PW["sup"])

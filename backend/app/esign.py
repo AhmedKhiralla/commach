@@ -36,6 +36,10 @@ STATEMENTS = {
     "calibration_reviewed": "I have reviewed this calibration record and agree with its results and verdict.",
     "task_cancelled": "I cancel this task for the reason given.",
     "impact_approved": "I approve this impact assessment and its conclusion.",
+    "pm_completed": "Done by: I performed this maintenance as recorded; the checklist, readings and parts used are true and complete.",
+    "pm_checked": "Checked by: I have checked this maintenance record and the condition of the equipment.",
+    "plan_reviewed": "I have reviewed this annual plan: the assets, intervals and due dates are complete and correct.",
+    "plan_approved": "I approve this annual plan and release its work.",
 }
 
 

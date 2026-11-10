@@ -6,8 +6,8 @@ The certificate AI was moved forward into Phase 2, so the Al-Andalous Medical Co
 | --- | --- | --- |
 | 1 | **Foundation and asset register.** Hierarchy, classes, vendors, assets and components, signed status changes, files, nameplate AI, AI register import, QR labels, overview, demo plant, connected-apps API | Released |
 | 2 | **Calibration** with certificate AI and OOT impact assessments (see below) | Released |
-| 3 | **Preventive maintenance** (see below) | Next |
-| 4 | **Tasks and notifications** (see below) | |
+| 3 | **Preventive maintenance** and annual plan approval (see below) | Released |
+| 4 | **Tasks and notifications** (see below) | Next |
 | 5 | **Forms and records** (see below) | |
 | 6 | **Analysis, assistant and Complanning** (see below) | |
 
@@ -45,6 +45,11 @@ dashboard (Phase 6).
 - **Schedules.** PM schedules are **fixed** (calendar-based) on the working calendar (Friday, holidays, Ramadan), with staggering and usage-based triggers ready for Companorama run hours.
 - **Plan approval.** The annual calibration plan and annual PM plan are signed by a supervisor and QA before tasks are released.
 - **Execution on the shop floor.** Phone/tablet execution: accept the task, then work the checklist, add photos, record spare parts and man-hours, and sign Done by / Checked by.
+
+Released in Phase 3 as described, plus: a printable annual plan (PDF grid with the signatures), four-eyes on plans
+(the reviewer cannot approve), plans that must be reviewed again when they change after the review, several checklists
+per machine, and a working calendar (weekend days, closures) that can also apply to calibration.
+Still to come: usage-based triggers from Companorama run hours (Phase 6, with the Complanning link).
 
 ## Phase 4 – Tasks and notifications
 

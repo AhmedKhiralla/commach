@@ -1,13 +1,15 @@
 // Calibration templates: points, tolerances and method per instrument type, approved by e-signature and
 // changed only through a new version.
 import { useEffect, useState } from "react";
-import { LuCopyPlus, LuListChecks, LuPlus, LuSignature, LuTrash2 } from "react-icons/lu";
+import { LuCopyPlus, LuListChecks, LuPlus, LuSignature, LuSparkles, LuTrash2 } from "react-icons/lu";
 import { Badge, Button, Empty, LoadError, LoadingRows, Notice, PageHead, SelectField, Sheet, TextField, errorText, fieldErrors, useLoad, useToast } from "../components/ui";
 import { SignDialog } from "../components/work";
 import { get, patch, post } from "../lib/api";
 import { useI18n } from "../lib/i18n";
 import type { StringKey } from "../lib/strings";
 import { nameOf, type AssetClass } from "../lib/types";
+import { useSession } from "../lib/session";
+import { ManualSheet, PmTemplateEditor } from "./PmTemplates";
 
 interface TemplateRow {
   id: string; code: string; version: number; title: string; title_ar: string | null; status: string; class_id: string | null;
@@ -183,16 +185,21 @@ export function TemplateEditor({ id, onClose, onChanged }: { id: string | "new";
   );
 }
 
-export function Templates() {
+export function Templates({ kind = "calibration" }: { kind?: "calibration" | "pm" }) {
   const { t, lang, date } = useI18n();
-  const list = useLoad(() => get<{ items: TemplateRow[]; can_edit: boolean }>("/api/templates?kind=calibration&all=1"));
+  const pm = kind === "pm";
+  const list = useLoad(() => get<{ items: TemplateRow[]; can_edit: boolean }>(`/api/templates?kind=${kind}&all=1`), [kind]);
   const [open, setOpen] = useState<string | null>(null);
+  const [manual, setManual] = useState(false);
+  const { me } = useSession();
   const [all, setAll] = useState(false);
   const items = (list.data?.items ?? []).filter((x) => all || x.status === "approved" || x.status === "draft");
   return (
     <>
-      <PageHead title={t("tpl.title")} lead={t("tpl.lead")} actions={list.data?.can_edit &&
-        <Button variant="primary" icon={<LuPlus />} onClick={() => setOpen("new")}>{t("tpl.new")}</Button>} />
+      <PageHead title={pm ? t("pmtpl.title") : t("tpl.title")} lead={pm ? t("pmtpl.lead") : t("tpl.lead")} actions={list.data?.can_edit && <>
+        {pm && me?.tenant?.ai.manual && <Button icon={<LuSparkles />} onClick={() => setManual(true)}>{t("pmtpl.fromManual")}</Button>}
+        <Button variant="primary" icon={<LuPlus />} onClick={() => setOpen("new")}>{pm ? t("pmtpl.new") : t("tpl.new")}</Button>
+      </>} />
       <div className="panel">
         <div className="toolbar">
           <label className="row small"><input type="checkbox" checked={all} onChange={(e) => setAll(e.target.checked)} />{t("tpl.showOld")}</label>
@@ -200,11 +207,11 @@ export function Templates() {
           {list.data && <span className="small muted">{items.length}</span>}
         </div>
         {list.error ? <LoadError error={list.error} onRetry={list.reload} /> : list.data && items.length === 0 ? (
-          <Empty icon={<LuListChecks />} title={t("tpl.empty")} body={t("tpl.emptyBody")} />
+          <Empty icon={<LuListChecks />} title={pm ? t("pmtpl.empty") : t("tpl.empty")} body={pm ? t("pmtpl.emptyBody") : t("tpl.emptyBody")} />
         ) : (
           <div className="table-wrap">
             <table className="table">
-              <thead><tr><th>{t("tpl.code")}</th><th>{t("tpl.titleField")}</th><th>{t("tpl.class")}</th><th>{t("tpl.items")}</th><th>{t("cw.col.state")}</th></tr></thead>
+              <thead><tr><th>{t("tpl.code")}</th><th>{t("tpl.titleField")}</th><th>{t("tpl.class")}</th><th>{pm ? t("pmtpl.items") : t("tpl.items")}</th><th>{t("cw.col.state")}</th></tr></thead>
               {!list.data ? <LoadingRows rows={6} cols={5} /> : (
                 <tbody>
                   {items.map((x) => (
@@ -214,7 +221,7 @@ export function Templates() {
                       <td><div className="cell-main">{lang === "ar" && x.title_ar ? x.title_ar : x.title}</div>
                         {x.method_ref && <div className="small subtle">{x.method_ref}</div>}</td>
                       <td className="small">{x.class_code ? `${x.class_code} · ${lang === "ar" && x.class_name_ar ? x.class_name_ar : x.class_name_en}` : "—"}</td>
-                      <td className="small nowrap">{t("tpl.points", { n: x.item_count })} · {t("tpl.inUse", { n: x.schedule_count })}</td>
+                      <td className="small nowrap">{pm ? t("man.items", { n: x.item_count }) : t("tpl.points", { n: x.item_count })} · {t("tpl.inUse", { n: x.schedule_count })}</td>
                       <td><Badge tone={TONE[x.status]}>{t(`tpl.status.${x.status}` as StringKey)}</Badge>
                         {x.approved_at && <div className="small subtle">{date(x.approved_at)}</div>}</td>
                     </tr>
@@ -225,7 +232,9 @@ export function Templates() {
           </div>
         )}
       </div>
-      {open && <TemplateEditor id={open} onClose={() => setOpen(null)} onChanged={() => list.reload()} />}
+      {open && !pm && <TemplateEditor id={open} onClose={() => setOpen(null)} onChanged={() => list.reload()} />}
+      {open && pm && <PmTemplateEditor id={open} onClose={() => setOpen(null)} onChanged={() => list.reload()} />}
+      {manual && <ManualSheet onClose={() => setManual(false)} onDone={() => list.reload()} />}
     </>
   );
 }

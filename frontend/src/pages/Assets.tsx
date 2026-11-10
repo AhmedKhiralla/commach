@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { LuBoxes, LuCalendarClock, LuDownload, LuFileSpreadsheet, LuPlus, LuPrinter, LuSignature, LuX } from "react-icons/lu";
+import { LuBoxes, LuCalendarClock, LuDownload, LuFileSpreadsheet, LuPlus, LuPrinter, LuSignature, LuWrench, LuX } from "react-icons/lu";
 import { CategoryIcon, Programmes, SignStatus, StatusBadge } from "../components/cm";
 import { Button, Empty, LoadError, LoadingRows, Menu, MenuItem, PageHead, useLoad } from "../components/ui";
 import { get, qs } from "../lib/api";
@@ -30,7 +30,7 @@ export function Assets() {
   const [q, setQ] = useState(f.q ?? "");
   const [sel, setSel] = useState<Map<string, AssetRow>>(new Map());
   const [signing, setSigning] = useState(false);
-  const [planning, setPlanning] = useState(false);
+  const [planning, setPlanning] = useState<"calibration" | "pm" | null>(null);
   const day = useDay();
   const [creating, setCreating] = useState(() => new URLSearchParams(window.location.search).get("new") === "1");
   const list = useLoad(() => get<{ items: AssetRow[]; total: number; page: number; page_size: number }>(`/api/assets${qs({ ...f, page_size: 100 })}`), [JSON.stringify(f)]);
@@ -89,7 +89,8 @@ export function Assets() {
           <div className="cm-selbar">
             <strong>{t("assets.selected", { n: sel.size })}</strong>
             <Button size="sm" variant="primary" icon={<LuSignature />} onClick={() => setSigning(true)}>{t("assets.changeStatus")}</Button>
-            {canEdit && <Button size="sm" icon={<LuCalendarClock />} onClick={() => setPlanning(true)}>{t("cw.plan")}</Button>}
+            {canEdit && <Button size="sm" icon={<LuCalendarClock />} onClick={() => setPlanning("calibration")}>{t("cw.plan")}</Button>}
+            {canEdit && <Button size="sm" icon={<LuWrench />} onClick={() => setPlanning("pm")}>{t("pmw.plan")}</Button>}
             <Menu trigger={(p) => <Button size="sm" icon={<LuPrinter />} {...p}>{t("assets.labels")}</Button>}>
               {(close) => <>
                 <MenuItem onClick={() => { close(); labels("&layout=a4&size=large"); }}>{t("assets.labelsA4")}</MenuItem>
@@ -146,7 +147,7 @@ export function Assets() {
         )}
       </div>
       {signing && <SignStatus assets={Array.from(sel.values())} onClose={() => setSigning(false)} onDone={() => { setSel(new Map()); list.reload(); }} />}
-      {planning && <SchedulePlanner assets={Array.from(sel.values())} onClose={() => setPlanning(false)} onDone={() => { setSel(new Map()); list.reload(); }} />}
+      {planning && <SchedulePlanner kind={planning} assets={Array.from(sel.values())} onClose={() => setPlanning(null)} onDone={() => { setSel(new Map()); list.reload(); }} />}
       {creating && <AssetForm siteId={f.site_id ?? siteId} onClose={() => { setCreating(false); }}
         onSaved={(a) => navigate(`/assets/${a.id}`)} />}
     </>
