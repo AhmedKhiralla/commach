@@ -8,8 +8,8 @@ The certificate AI was moved forward into Phase 2, so the Al-Andalous Medical Co
 | 2 | **Calibration** with certificate AI and OOT impact assessments (see below) | Released |
 | 3 | **Preventive maintenance** and annual plan approval (see below) | Released |
 | 4 | **Tasks and notifications** (see below) | Released |
-| 5 | **Forms and records** (see below) | Next |
-| 6 | **Analysis, assistant and Complanning** (see below) | |
+| 5 | **Forms and records** (see below) | Released |
+| 6 | **Analysis, assistant and Complanning** (see below) | Next |
 
 ## Phase 2 – Calibration
 
@@ -79,6 +79,12 @@ button, one escalation e-mail per person per run (not one per task), and delegat
 - **Block designer.** Logo, title, format number, revision, header fields, data block, table and columns, footer, and Prepared / Approved / Authorized signatures.
 - **Word templates with merge fields.** For example the customer's own QA027/F01 annual calibration schedule, EN002 annual PM schedule, EN003 breakdown note and history card, EN004 building checklist, and QA027/L01 status label.
 - **Approval.** Templates are approved and versioned as controlled documents.
+
+Released in Phase 5 as described for plans, calibration and PM records, the history card (EN003/F02) and the status
+label, plus: a live page preview in the designer, a starter Word file per record type, a check that blocks approval
+of a Word file with unknown merge fields, and a numbered controlled-copy log with the SHA-256 of every print.
+The EN003 breakdown note and the EN004 building checklist wait for breakdown work orders and building checks, which are
+not in this version; their layouts can already be drafted on the history card and PM record forms.
 
 ## Phase 6 – Analysis, assistant and Complanning
 

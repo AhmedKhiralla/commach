@@ -74,6 +74,18 @@ Evidence: `tests/test_maintenance.py`.
 
 Evidence: `tests/test_notify.py`.
 
+### Forms and controlled copies (Phase 5)
+
+- A form (block layout or Word template) is a controlled document: only QA approves it, with the `form_approved`
+  signature; an approved version is frozen by a database trigger (only its default flag and its move to superseded or
+  retired may change) and cannot be deleted. Changes need a new version, which supersedes the old one on approval.
+- A Word template whose merge fields do not exist for its record type cannot be approved.
+- Every print is recorded in `form_issues` with a controlled-copy number, the form code, version and status, the
+  record printed, the file format, its SHA-256 and the person who printed it; the row cannot be changed or deleted,
+  and the print is audited (`EXPORT`). Draft forms print watermarked "DRAFT – NOT FOR GMP USE".
+
+Evidence: `tests/test_forms.py`.
+
 ## Subpart C — Electronic signatures
 
 | Clause | Requirement | How ComMach meets it | Evidence |

@@ -103,9 +103,25 @@ address (`commach.comp11labs.com`) and its own database, with an API that connec
   - **Delegation** for leave (the delegate sees and works the tasks; signing still needs their own role) and
     **handover** of a leaving user's tasks, schedules, head roles and delegations, optionally with their site roles.
 
+- **Phase 5 – Forms and records**
+  - **Forms and records** holds the company's controlled formats for the annual calibration and PM plans, calibration
+    and PM records, the equipment history card and the status label.
+  - **Block designer** with a live preview: page size and orientation, logo, title, subtitle, annexure / format number
+    and revision, field grids, tables (plan rows with scheduled / executed lines, readings, standards, spare parts,
+    history), text, Prepared / Approved / Authorized signature boxes and a footer with "Page x of y".
+  - **Word templates**: upload the company's own .docx with merge fields such as `{{asset.code}}`; a table row with
+    `{{se_rows.m1}}` (or results, standards, parts, history) repeats once per item. A starter Word file with all the
+    fields can be downloaded; unknown fields are flagged and block approval.
+  - Forms are **controlled documents**: drafted, approved by QA with an e-signature, frozen, versioned (the default
+    moves to the new version) and retired with a reason.
+  - Every print is a **controlled copy**: numbered CC-YYYY-NNNNN, stamped with the form version, logged with its
+    SHA-256 and the person who printed it. A draft form prints with "DRAFT – NOT FOR GMP USE".
+  - **Print** buttons on calibration and PM tasks, the annual plans, and each asset (history card, status label).
+  - The demo company has the six standard forms approved and in use (QA027-00/F01, F02, L01, EN002-01/F01, F02, EN003-F02).
+
 The web app is English and Arabic (right-to-left), with light, dark and system themes, and works on phones and tablets.
 
-See [docs/ROADMAP.md](docs/ROADMAP.md) for the next phases (forms and records come next),
+See [docs/ROADMAP.md](docs/ROADMAP.md) for the next phases (analysis, the assistant and Complanning come next),
 [docs/PART11.md](docs/PART11.md) for the 21 CFR Part 11 traceability and [docs/INTEGRATION.md](docs/INTEGRATION.md)
 for connecting Complanning.
 

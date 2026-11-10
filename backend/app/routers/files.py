@@ -14,7 +14,7 @@ from .. import storage
 from ..api import ApiError, Call, endpoint, not_found
 from ..config import settings
 
-PURPOSES = ("photo", "nameplate", "manual", "certificate", "import", "attachment")
+PURPOSES = ("photo", "nameplate", "manual", "certificate", "import", "attachment", "form", "logo")
 
 
 def save_upload(call: Call, data: bytes, filename: str, purpose: str) -> dict:

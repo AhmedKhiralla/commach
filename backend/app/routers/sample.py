@@ -327,6 +327,7 @@ def load_sample(call: Call):
     cal_counts = load_calibration(call, sid, ids, vendors, today)
     cal_counts.update(load_pm(call, sid, ids, vendors, today))
     cal_counts["plans"] = load_plans(call, sid, today)
+    cal_counts["forms"] = load_forms(call)
     tx.x("SELECT set_config('app.status_change', '', true)")
     if b.give_me_roles:
         for role in ("qa_approver", "engineering_manager", "qa_calibration_officer", "engineering_supervisor"):
@@ -806,4 +807,25 @@ def load_plans(call: Call, sid: str, today: dt.date) -> int:
                       dt.datetime.now(dt.timezone.utc) if status == "approved" else None,
                       "QA approver (demo)" if status == "approved" else None)
             n += 1
+    return n
+
+
+DEMO_FORMS = [("QA027-F01", "Annual calibration schedule", "calibration_plan", "QA027-00/F01", "00"),
+              ("EN002-F01", "Annual preventive maintenance schedule", "pm_plan", "EN002-01/F01", "01"),
+              ("QA027-F02", "Calibration record", "calibration_record", "QA027-00/F02", "00"),
+              ("EN002-F02", "Preventive maintenance record", "pm_record", "EN002-01/F02", "01"),
+              ("EN003-F02", "Equipment history card", "history_card", "EN003-00/F02", "00"),
+              ("QA027-L01", "Status label", "status_label", "QA027-00/L01", "00")]
+
+
+def load_forms(call: Call) -> int:
+    from .. import forms
+    n = 0
+    for code, title, source, fmt, rev in DEMO_FORMS:
+        if call.tx.val("SELECT 1 FROM form_templates WHERE code = %s", code):
+            continue
+        call.tx.x("INSERT INTO form_templates (tenant_id, code, title, source, engine, layout, format_no, revision, is_default, status,"
+                  " approved_at, approved_by_name, source_kind) VALUES (%s, %s, %s, %s, 'blocks', %s::jsonb, %s, %s, true, 'approved', now(),"
+                  " 'QA approver (demo)', 'demo')", call.tenant_id, code, title, source, json.dumps(forms.default_layout(source)), fmt, rev)
+        n += 1
     return n

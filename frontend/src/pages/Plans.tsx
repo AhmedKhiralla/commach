@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { LuCalendarRange, LuChevronLeft, LuChevronRight, LuPrinter, LuSignature } from "react-icons/lu";
 import { Badge, Button, Empty, LoadError, Notice, PageHead, useLoad } from "../components/ui";
+import { PrintFormButton } from "../components/forms";
 import { SignDialog, useDay, useEvery } from "../components/work";
 import { get, post, qs } from "../lib/api";
 import { useI18n } from "../lib/i18n";
@@ -47,6 +48,7 @@ export function PlanPage({ kind }: { kind: "calibration" | "pm" }) {
     <>
       <PageHead title={t(`plan.title.${kind}` as StringKey)} lead={<>{t("plan.lead")}{v.data?.gating ? ` ${t("plan.leadGate")}` : ""}</>} actions={<>
         <Button icon={<LuPrinter />} onClick={() => window.open(`/api/plans/pdf${qs({ site_id: site, kind, year })}`, "_blank", "noopener")}>{t("plan.pdf")}</Button>
+        <PrintFormButton source={kind === "pm" ? "pm_plan" : "calibration_plan"} params={{ site_id: site, year }} label={t("fm.printPlan")} />
         {v.data?.can_review && (v.data.status === "draft" || v.data.changed_since_signed) && <Button icon={<LuSignature />} onClick={() => setSigning("review")}>{t("plan.review")}</Button>}
         {v.data?.can_approve && <Button variant="primary" icon={<LuSignature />} onClick={() => setSigning("approve")}>{t("plan.approve")}</Button>}
       </>} />

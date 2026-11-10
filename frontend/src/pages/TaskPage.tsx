@@ -6,6 +6,7 @@ import {
   LuTrash2, LuTruck, LuUpload, LuX,
 } from "react-icons/lu";
 import { StatusBadge } from "../components/cm";
+import { PrintFormButton } from "../components/forms";
 import { Badge, Button, LoadError, Notice, TextField, errorText, useLoad, useToast } from "../components/ui";
 import {
   DueWhen, SignDialog, TaskStateBadge, VerdictBadge, todayIso, useDay, useEvery, useRuleText,
@@ -317,6 +318,7 @@ export function TaskPage({ taskId }: { taskId: string }) {
           {x.perms.review && <Button variant="primary" icon={<LuSignature />} onClick={() => setDialog("review")}>{L.review}</Button>}
           {x.perms.reschedule && <Button variant="ghost" icon={<LuCalendarClock />} onClick={() => setDialog("reschedule")}>{t("rs.title")}</Button>}
           {x.perms.cancel && x.status !== "at_vendor" && <Button variant="ghost" icon={<LuX />} onClick={() => setDialog("cancel")}>{t("task.cancel")}</Button>}
+          {!edit && <PrintFormButton source={isPm ? "pm_record" : "calibration_record"} params={{ task_id: x.id }} />}
         </div>
       </div>
 

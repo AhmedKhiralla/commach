@@ -1,3 +1,4 @@
+import { FormPage, FormsPage } from "./pages/Forms";
 import { StrictMode, type ReactElement } from "react";
 import { createRoot } from "react-dom/client";
 import { LuCompass, LuShieldCheck } from "react-icons/lu";
@@ -59,6 +60,7 @@ function Routes() {
   if ((m = match("/plans/:kind", path)) && (m.kind === "calibration" || m.kind === "pm"))
     return gate(tenantUser, <PlanPage key={m.kind} kind={m.kind} />);
   if ((m = match("/calibration/impacts/:id", path))) return gate(tenantUser, <ImpactPage key={m.id} impactId={m.id} />);
+  if ((m = match("/forms/:id", path))) return gate(tenantUser, <FormPage key={m.id} id={m.id} />);
   if ((m = match("/a/:code", path))) return gate(tenantUser, <ScanCode key={m.code} code={m.code} />);
   switch (path) {
     case "/assets": return gate(tenantUser, <Assets key={window.location.search.includes("new=1") ? "new" : "list"} />);
@@ -69,6 +71,7 @@ function Routes() {
     case "/maintenance": return gate(tenantUser, <MaintenanceWork />);
     case "/maintenance/templates": return gate(tenantUser, <Templates key="pm" kind="pm" />);
     case "/calibration/impacts": return gate(tenantUser, <Impacts />);
+    case "/forms": return gate(tenantUser, <FormsPage />);
     case "/import": return gate(tenantUser, <ImportPage />);
     case "/locations": return gate(tenantUser, <Locations />);
     case "/classes": return gate(tenantUser, <Classes />);

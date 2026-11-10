@@ -2,6 +2,7 @@
 import { calAr, calEn } from "./strings_cal";
 import { pmAr, pmEn } from "./strings_pm";
 import { todoAr, todoEn } from "./strings_todo";
+import { formsAr, formsEn } from "./strings_forms";
 import { cmAr, cmEn } from "./strings_cm";
 
 const enBase = {
@@ -387,7 +388,7 @@ const enBase = {
   "forbidden.body": "Ask your company administrator for the role you need.",
 };
 
-export const en = { ...enBase, ...cmEn, ...calEn, ...pmEn, ...todoEn };
+export const en = { ...enBase, ...cmEn, ...calEn, ...pmEn, ...todoEn, ...formsEn };
 export type StringKey = keyof typeof en;
 
 const arBase: Record<keyof typeof enBase, string> = {
@@ -760,4 +761,4 @@ const arBase: Record<keyof typeof enBase, string> = {
   "forbidden.body": "اطلب من مسؤول شركتك الدور المناسب.",
 };
 
-export const ar: Record<StringKey, string> = { ...arBase, ...cmAr, ...calAr, ...pmAr, ...todoAr } as Record<StringKey, string>;
+export const ar: Record<StringKey, string> = { ...arBase, ...cmAr, ...calAr, ...pmAr, ...todoAr, ...formsAr } as Record<StringKey, string>;

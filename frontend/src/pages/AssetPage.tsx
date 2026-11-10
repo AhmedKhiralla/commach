@@ -3,6 +3,7 @@ import {
   LuArrowLeft, LuFileText, LuHistory, LuPencil, LuPlus, LuPrinter, LuQrCode, LuSignature, LuSparkles, LuTrash2, LuUpload,
 } from "react-icons/lu";
 import { CategoryIcon, Programmes, SignStatus, StatusBadge } from "../components/cm";
+import { PrintFormButton } from "../components/forms";
 import { Badge, Button, Dialog, Empty, LoadError, Notice, SelectField, TextField, errorText, useLoad, useToast } from "../components/ui";
 import { get, post, upload } from "../lib/api";
 import { useI18n } from "../lib/i18n";
@@ -122,6 +123,8 @@ export function AssetPage({ assetId }: { assetId: string }) {
           {a.can_edit && <Button icon={<LuPencil />} onClick={() => setEditing(true)}>{t("asset.edit")}</Button>}
           {canSign && <Button variant="primary" icon={<LuSignature />} onClick={() => setSigning(true)}>{t("asset.status")}</Button>}
           <Button icon={<LuPrinter />} onClick={() => window.open(`/api/assets/labels.pdf?ids=${a.id}&layout=roll`, "_blank", "noopener")}>{t("asset.label")}</Button>
+          <PrintFormButton source="history_card" params={{ asset_id: a.id }} label={t("fm.historyCard")} />
+          <PrintFormButton source="status_label" params={{ asset_id: a.id }} label={t("fm.statusLabel")} />
         </div>
       </div>
       {a.status === "draft" && <Notice tone="warn">{t("asset.draftNotice")}</Notice>}

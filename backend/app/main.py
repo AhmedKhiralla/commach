@@ -13,6 +13,7 @@ from starlette.responses import FileResponse, JSONResponse, PlainTextResponse
 from starlette.routing import Route
 
 from .config import settings
+from .routers import forms as forms_r
 from .routers import (ai_routes, assets, audit_trail, auth, company, excel, files, hierarchy, integration, labels, lists, todo,
                       platform, sample, work)
 
@@ -116,6 +117,21 @@ API_ROUTES = [
     Route("/api/tasks/{task_id}/review", work.review_task, methods=["POST"]),
     Route("/api/tasks/{task_id}/cancel", work.cancel_task, methods=["POST"]),
     Route("/api/tasks/{task_id}/certificate", ai_routes.certificate, methods=["POST"]),
+    Route("/api/forms", forms_r.list_forms, methods=["GET"]),
+    Route("/api/forms", forms_r.create_form, methods=["POST"]),
+    Route("/api/forms/meta", forms_r.form_meta, methods=["GET"]),
+    Route("/api/forms/preview", forms_r.preview_layout, methods=["POST"]),
+    Route("/api/forms/print", forms_r.print_default, methods=["GET"]),
+    Route("/api/forms/starter.docx", forms_r.starter, methods=["GET"]),
+    Route("/api/forms/issues", forms_r.list_issues, methods=["GET"]),
+    Route("/api/forms/{form_id}", forms_r.get_form, methods=["GET"]),
+    Route("/api/forms/{form_id}", forms_r.update_form, methods=["PATCH"]),
+    Route("/api/forms/{form_id}/approve", forms_r.approve_form, methods=["POST"]),
+    Route("/api/forms/{form_id}/new-version", forms_r.new_form_version, methods=["POST"]),
+    Route("/api/forms/{form_id}/default", forms_r.make_default, methods=["POST"]),
+    Route("/api/forms/{form_id}/retire", forms_r.retire_form, methods=["POST"]),
+    Route("/api/forms/{form_id}/preview", forms_r.preview_form, methods=["GET"]),
+    Route("/api/forms/{form_id}/print", forms_r.print_form, methods=["GET"]),
     Route("/api/todo", todo.get_todo, methods=["GET"]),
     Route("/api/notifications", todo.list_notifications, methods=["GET"]),
     Route("/api/notifications/read", todo.read_notifications, methods=["POST"]),

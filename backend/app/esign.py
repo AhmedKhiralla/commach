@@ -43,6 +43,7 @@ STATEMENTS = {
     "reschedule_approved": "As supervisor I approve moving this task to the new due date for the reason given.",
     "reschedule_qa_approved": "As QA I approve moving this task beyond its tolerance window for the reason given.",
     "deviation_closed": "I close this deviation: the root cause is identified and the actions are complete.",
+    "form_approved": "I approve this form as a controlled document: its layout, fields and format number are correct for use.",
 }
 
 

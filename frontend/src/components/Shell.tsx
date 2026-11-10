@@ -52,9 +52,9 @@ function groupsFor(isPlatform: boolean, isAdmin: boolean, canAudit: boolean): Na
       { to: "/classes", label: "nav.classes", icon: <LuTags /> },
       { to: "/vendors", label: "nav.vendors", icon: <LuTruck /> },
       { to: "/departments", label: "nav.departments", icon: <LuNetwork /> },
+      { to: "/forms", label: "nav.forms", icon: <LuFileText /> },
     ] },
     { title: "nav.coming", items: [
-      { label: "nav.forms", icon: <LuFileText />, phase: 5 },
       { label: "nav.analysis", icon: <LuChartLine />, phase: 6 },
     ] },
   ];
