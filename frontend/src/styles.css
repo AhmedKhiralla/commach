@@ -1926,3 +1926,17 @@ a.cm-tree-name:hover { color: var(--brand); text-decoration: underline; }
   .cm-ask-chat { min-height: 60vh; }
   .cm-ask-msg { max-width: 100%; }
 }
+.cm-sys-head { display: flex; flex-direction: column; gap: 4px; }
+.cm-sys-big { display: inline-flex; align-items: center; gap: 8px; font-size: 18px; font-weight: 600; }
+.cm-sys-head.ok .cm-sys-big { color: var(--ok); }
+.cm-sys-head.warn .cm-sys-big { color: var(--warn); }
+.cm-sys-head.fail .cm-sys-big { color: var(--danger); }
+.cm-sys { list-style: none; margin: 0; padding: 0; }
+.cm-sys li { display: flex; gap: 12px; padding: 12px 18px; border-bottom: 1px solid var(--line); }
+.cm-sys li:last-child { border-bottom: 0; }
+.cm-sys-icon { display: inline-grid; place-items: center; width: 22px; flex: none; color: var(--text-2); }
+.cm-sys-icon svg { width: 18px; height: 18px; }
+.cm-sys-icon.ok { color: var(--ok); }
+.cm-sys-icon.warn { color: var(--warn); }
+.cm-sys-icon.fail { color: var(--danger); }
+.cm-sys .grow { flex: 1; min-width: 0; overflow-wrap: anywhere; }

@@ -102,5 +102,8 @@ Released in Phase 6 as described, plus: drift charts on every instrument, vendor
 inbound run-hours from Complanning, the free-slot suggestion on each PM task with a one-click reschedule request, and
 a log of every assistant question with the look-ups it made. The assistant reads; it never changes a record.
 
+Pilot readiness (after Phase 6): validation pack with the executed OQ report, system check, load test — see
+[validation/README.md](validation/README.md).
+
 Possible next steps: breakdown work orders (EN003 breakdown note), building checklists (EN004), single sign-on across
 Comp11 Labs products, and spare-parts stock.

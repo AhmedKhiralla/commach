@@ -25,6 +25,7 @@ from .config import settings
 
 log = logging.getLogger("commach.notify")
 LOCK_ID = 727_041
+STATE: dict = {"last_run": None, "last_error": None}   # shown by the system check
 SUPERVISORS = {"calibration": ("qa_calibration_officer", "engineering_supervisor"), "pm": ("engineering_supervisor",)}
 REVIEWERS = {"calibration": ("qa_approver", "qa_calibration_officer"), "pm": ("engineering_supervisor", "engineering_manager", "qa_approver")}
 APPROVE_SUPERVISOR = {"calibration": ("engineering_supervisor", "engineering_manager", "qa_calibration_officer"),
@@ -445,8 +446,10 @@ async def scheduler_loop() -> None:
     while True:
         try:
             out = await asyncio.to_thread(run_all)
+            STATE["last_run"], STATE["last_error"] = dt.datetime.now(dt.timezone.utc), None
             if any(v for k, v in out.items() if k != "skipped"):
                 log.info("Scheduler: %s", out)
-        except Exception:
+        except Exception as e:
+            STATE["last_error"] = f"{type(e).__name__}: {str(e)[:200]}"
             log.exception("Scheduler run failed")
         await asyncio.sleep(settings.scheduler_seconds)

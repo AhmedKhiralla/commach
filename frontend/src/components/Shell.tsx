@@ -1,6 +1,6 @@
 import { useEffect, useState, type ReactNode } from "react";
 import {
-  LuBoxes, LuBuilding2, LuCalendarRange, LuClipboardList, LuChartLine, LuSparkles, LuChevronDown, LuClipboardCheck, LuFileSpreadsheet, LuFileText,
+  LuActivity, LuBoxes, LuBuilding2, LuCalendarRange, LuClipboardList, LuChartLine, LuSparkles, LuChevronDown, LuClipboardCheck, LuFileSpreadsheet, LuFileText,
   LuHouse, LuKeyRound, LuListTodo, LuOctagonAlert, LuLanguages, LuListChecks, LuLogOut, LuMapPin, LuMenu, LuMonitor, LuMoon, LuNetwork, LuScrollText,
   LuSearch, LuSettings, LuShieldAlert, LuSun, LuTags, LuTruck, LuUsers, LuWrench, LuX,
 } from "react-icons/lu";
@@ -22,6 +22,7 @@ function groupsFor(isPlatform: boolean, isAdmin: boolean, canAudit: boolean): Na
       { items: [{ to: "/", label: "nav.home", icon: <LuHouse /> }] },
       { title: "nav.platform", items: [
         { to: "/companies", label: "nav.companies", icon: <LuBuilding2 /> },
+        { to: "/system", label: "nav.system", icon: <LuActivity /> },
         { to: "/audit", label: "nav.audit", icon: <LuScrollText /> },
       ] },
     ];

@@ -135,6 +135,14 @@ address (`commach.comp11labs.com`) and its own database, with an API that connec
   - **Ask ComMach**: questions in English or Arabic, answered by the AI only from read-only look-ups ComMach runs
     with the user's own access; answers link to the records, and every question is logged.
 
+- **Pilot readiness**
+  - **Validation pack** (`docs/validation`): user requirements traced to automated OQ test cases, an IQ checklist for
+    Railway, suggested PQ scenarios, and `python -m validation.run_oq`, which runs the suite on a throw-away database
+    and prints the executed OQ report (PDF) for QA signature.
+  - **System check** for the platform owner after each deployment: database, migrations, row-level security,
+    audit-trail integrity, stored files against their SHA-256, e-mail and AI sign-in, scheduler and settings.
+  - Load-tested with 1,022 assets and 25 simultaneous users (see `docs/validation`).
+
 The web app is English and Arabic (right-to-left), with light, dark and system themes, and works on phones and tablets.
 
 See [docs/ROADMAP.md](docs/ROADMAP.md) for the next phases (all six phases are released),

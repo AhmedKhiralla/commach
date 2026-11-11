@@ -114,15 +114,29 @@ def _fit(xs: list[float], ys: list[float]) -> tuple[float, float] | None:
     return my - b * mx, b
 
 
-def drift_series(call: Call, asset_id: str, t0: dt.date, limit: int = 12) -> list[dict]:
+DRIFT_SQL = """
+SELECT t.asset_id, t.id AS task_id, t.number, t.performed_date, r.parameter, r.nominal, r.unit, r.low_limit, r.high_limit,
+       r.as_found, r.as_left, r.ok_found
+  FROM (SELECT id, asset_id, number, performed_date,
+               row_number() OVER (PARTITION BY asset_id ORDER BY performed_date DESC) AS n
+          FROM tasks WHERE asset_id = ANY(%s::uuid[]) AND kind = 'calibration' AND status = 'completed') t
+  JOIN task_results r ON r.task_id = t.id
+ WHERE t.n <= %s AND r.item_type = 'point'
+ ORDER BY t.asset_id, r.parameter, r.nominal NULLS FIRST, t.performed_date
+"""
+
+
+def drift_rows(call: Call, asset_ids: list[str], limit: int) -> dict[str, list[dict]]:
+    out: dict[str, list[dict]] = {}
+    for r in call.tx.q(DRIFT_SQL, [str(a) for a in asset_ids], limit) if asset_ids else []:
+        out.setdefault(str(r["asset_id"]), []).append(r)
+    return out
+
+
+def drift_series(call: Call, asset_id: str, t0: dt.date, limit: int = 12, rows: list[dict] | None = None) -> list[dict]:
     """Per calibration point: the as-found history, the drift line since the last adjustment and when it will cross a limit."""
-    rows = call.tx.q(
-        "SELECT t.id AS task_id, t.number, t.performed_date, r.parameter, r.nominal, r.unit, r.low_limit, r.high_limit,"
-        " r.as_found, r.as_left, r.ok_found FROM tasks t JOIN task_results r ON r.task_id = t.id"
-        " WHERE t.asset_id = %s::uuid AND t.kind = 'calibration' AND t.status = 'completed' AND r.item_type = 'point'"
-        " AND t.id IN (SELECT id FROM tasks WHERE asset_id = %s::uuid AND kind = 'calibration' AND status = 'completed'"
-        "              ORDER BY performed_date DESC LIMIT %s)"
-        " ORDER BY r.parameter, r.nominal NULLS FIRST, t.performed_date", asset_id, asset_id, limit)
+    if rows is None:
+        rows = drift_rows(call, [asset_id], limit).get(str(asset_id), [])
     series: dict[tuple, dict] = {}
     for r in rows:
         key = (r["parameter"], str(r["nominal"]), r["unit"])
@@ -203,6 +217,7 @@ def intervals(call: Call):
         " row_number() OVER (PARTITION BY t.schedule_id ORDER BY t.performed_date DESC) AS n FROM tasks t"
         " WHERE t.kind = 'calibration' AND t.status = 'completed' AND t.schedule_id = ANY(%s::uuid[])) x WHERE n <= 6"
         " ORDER BY performed_date DESC", [str(s["id"]) for s in scheds])
+    preload = drift_rows(call, list({str(s["asset_id"]) for s in scheds}), 6)
     by: dict[str, list] = {}
     for h in hist:
         by.setdefault(str(h["schedule_id"]), []).append(h)
@@ -214,7 +229,8 @@ def intervals(call: Call):
         cur = _months(s["interval_value"], s["interval_unit"])
         last_done = s["last_done"] or h[0]["performed_date"]
         rec, reason, extra = None, None, {}
-        series = drift_series(call, str(s["asset_id"]), t0, 6) if len(h) >= 3 or work.is_oot(h[0]["verdict"]) else []
+        series = drift_series(call, str(s["asset_id"]), t0, 6, preload.get(str(s["asset_id"]), [])) \
+            if len(h) >= 3 or work.is_oot(h[0]["verdict"]) else []
         crossings = [x["projected_crossing"] for x in series if x["projected_crossing"]]
         first_cross = min(crossings) if crossings else None
         margins = [x["margin_used_pct"] for x in series if x["margin_used_pct"] is not None]

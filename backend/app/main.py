@@ -14,7 +14,7 @@ from starlette.routing import Route
 
 from .config import settings
 from .routers import forms as forms_r
-from .routers import analysis, assistant
+from .routers import analysis, assistant, system
 from .routers import (ai_routes, assets, audit_trail, auth, company, excel, files, hierarchy, integration, labels, lists, todo,
                       platform, sample, work)
 
@@ -31,6 +31,7 @@ API_ROUTES = [
     Route("/api/auth/change-password", auth.change_password, methods=["POST"]),
     Route("/api/auth/preferences", auth.preferences, methods=["PATCH"]),
     # Platform administration
+    Route("/api/platform/system-check", system.system_check, methods=["GET"]),
     Route("/api/platform/tenants", platform.list_tenants, methods=["GET"]),
     Route("/api/platform/tenants", platform.create_tenant, methods=["POST"]),
     Route("/api/platform/tenants/{tenant_id}", platform.update_tenant, methods=["PATCH"]),

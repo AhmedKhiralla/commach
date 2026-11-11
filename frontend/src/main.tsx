@@ -1,6 +1,7 @@
 import { FormPage, FormsPage } from "./pages/Forms";
 import { AnalysisPage } from "./pages/Analysis";
 import { AskPage } from "./pages/Ask";
+import { SystemCheckPage } from "./pages/SystemCheck";
 import { StrictMode, type ReactElement } from "react";
 import { createRoot } from "react-dom/client";
 import { LuCompass, LuShieldCheck } from "react-icons/lu";
@@ -84,6 +85,7 @@ function Routes() {
     case "/":
     case "/login": return <Home />;
     case "/companies": return gate(platform, <Companies />);
+    case "/system": return gate(platform, <SystemCheckPage />);
     case "/users": return gate(admin, <Users />);
     case "/sites": return gate(admin, <Sites />);
     case "/settings": return gate(admin, <Settings />);

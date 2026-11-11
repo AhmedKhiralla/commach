@@ -252,6 +252,10 @@ def _db_error(err: psycopg.Error) -> ApiError:
         return ApiError(422, "invalid", "A value is not in the allowed format.")
     if state == "23503":
         return ApiError(409, "in_use", "This record is linked to other data.")
+    if state == "22P02" and "uuid" in str(err):
+        return ApiError(404, "not_found", "The record was not found.")
+    if state in ("22P02", "22007", "22008", "22003"):
+        return ApiError(422, "invalid", "A value is not in the allowed format.")
     if state == "42501":
         log.warning("Refused by the database: %s", str(err).splitlines()[0][:300])
         return ApiError(403, "forbidden", "You do not have access to this record.")
