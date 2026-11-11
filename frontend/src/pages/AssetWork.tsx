@@ -1,4 +1,5 @@
 // The asset page's Calibration tab: its schedule, every calibration task and the impact assessments.
+import { DriftPanel, RunHoursPanel } from "./Analysis";
 import { useState } from "react";
 import { LuCalendarClock, LuPencil, LuBan } from "react-icons/lu";
 import { Badge, Button, Dialog, Empty, LoadError, Notice, TextField, errorText, useLoad } from "../components/ui";
@@ -135,6 +136,9 @@ export function AssetCalibration({ asset, onChanged, kind = "calibration" }: {
           </ul>
         </section>
       )}
+
+      {!pm && <DriftPanel assetId={asset.id} />}
+      {pm && <RunHoursPanel key={w.data.schedules?.length} assetId={asset.id} />}
 
       {planning && <SchedulePlanner kind={kind} assets={[asset]} schedule={planning === "new" ? undefined : planning} onClose={() => setPlanning(null)} onDone={done} />}
       {ending && <EndSchedule schedule={ending} onClose={() => setEnding(null)} onDone={done} />}

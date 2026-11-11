@@ -328,6 +328,7 @@ def load_sample(call: Call):
     cal_counts.update(load_pm(call, sid, ids, vendors, today))
     cal_counts["plans"] = load_plans(call, sid, today)
     cal_counts["forms"] = load_forms(call)
+    cal_counts.update(load_phase6(call, sid, ids, today))
     tx.x("SELECT set_config('app.status_change', '', true)")
     if b.give_me_roles:
         for role in ("qa_approver", "engineering_manager", "qa_calibration_officer", "engineering_supervisor"):
@@ -829,3 +830,56 @@ def load_forms(call: Call) -> int:
                   " 'QA approver (demo)', 'demo')", call.tenant_id, code, title, source, json.dumps(forms.default_layout(source)), fmt, rev)
         n += 1
     return n
+
+
+# ================================================================== Phase 6: run-hours and the production plan
+PRODUCTS = ["Paracetamol 500 mg tablets", "Amoxicillin 500 mg capsules", "Metformin 850 mg tablets", "Ibuprofen 400 mg tablets",
+            "Omeprazole 20 mg capsules", "Vitamin C 1000 mg effervescent", "Diclofenac 50 mg tablets"]
+
+
+def load_phase6(call: Call, sid: str, ids: dict[str, str], today: dt.date) -> dict:
+    """Run-hours meters on the production machines (two with run-hours PM triggers) and a released production plan for
+    the next eight weeks, as Complanning would send it."""
+    from .. import hours
+    tx, tid = call.tx, call.tenant_id
+    machines = tx.q("SELECT a.id, a.code FROM assets a JOIN asset_classes c ON c.id = a.class_id WHERE a.site_id = %s::uuid"
+                    " AND c.code = 'MACHINE' AND a.status IN ('in_service', 'restricted') AND a.parent_id IS NULL ORDER BY a.code", sid)
+    now = dt.datetime.now(dt.timezone.utc).replace(minute=0, second=0, microsecond=0)
+    readings = windows = 0
+    for i, m in enumerate(machines):
+        rate = 12 + round(_h("rate" + m["code"]) * 8, 1)          # run-hours per day
+        tx.x("UPDATE assets SET meter_unit = 'hours' WHERE id = %s", m["id"])
+        total = 4000 + int(_h("meter" + m["code"]) * 20000)
+        for k in range(18, -1, -1):                                # weekly readings for four months
+            at = now - dt.timedelta(days=7 * k, hours=int(_h(m["code"] + str(k)) * 6))
+            if k:
+                total += rate * 7 * (0.85 + 0.3 * _h("w" + m["code"] + str(k)))
+            tx.x("INSERT INTO meter_readings (tenant_id, asset_id, reading, read_at, source, entered_by_name) VALUES"
+                 " (%s, %s, %s, %s, 'demo', 'Maintenance technician (demo)')", tid, m["id"], round(total, 1), at)
+            readings += 1
+        # campaigns for the next eight weeks, with short changeover gaps between them
+        t = dt.datetime.combine(today, dt.time(6), dt.timezone.utc) - dt.timedelta(days=2)
+        k = 0
+        while t < dt.datetime.combine(today + dt.timedelta(days=56), dt.time(), dt.timezone.utc):
+            length = dt.timedelta(days=2 + int(_h("c" + m["code"] + str(k)) * 4), hours=int(_h("h" + m["code"] + str(k)) * 12))
+            prod = PRODUCTS[int(_h("p" + m["code"] + str(k)) * len(PRODUCTS))]
+            tx.x("INSERT INTO production_windows (tenant_id, asset_id, starts_at, ends_at, label, ref, source) VALUES"
+                 " (%s, %s, %s, %s, %s, %s, 'demo')", tid, m["id"], t, t + length, prod, f"CP-{today.year % 100}-{300 + windows}")
+            windows += 1
+            gap = dt.timedelta(hours=8 + int(_h("g" + m["code"] + str(k)) * 22))
+            t = t + length + gap
+            k += 1
+    # run-hours triggers on the first two machines' PM: one already used up, one close
+    trig = 0
+    for m, frac in zip(machines[:2], (1.08, 0.82)):
+        s = tx.one("SELECT id FROM schedules WHERE asset_id = %s AND kind = 'pm' AND active ORDER BY created_at LIMIT 1", m["id"])
+        if not s:
+            continue
+        tot = hours.run_totals(tx, [m["id"]])[str(m["id"])]
+        interval = 500
+        tx.x("UPDATE schedules SET hours_interval = %s, hours_at_last = %s WHERE id = %s", interval,
+             round(float(tot["total"]) - interval * frac, 1), s["id"])
+        trig += 1
+    st = work.effective_settings(tx.val("SELECT work_settings FROM tenants WHERE id = %s", tid))
+    hours.check(tx, today, st)
+    return {"meter_readings": readings, "production_windows": windows, "hours_triggers": trig}

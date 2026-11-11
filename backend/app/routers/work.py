@@ -15,7 +15,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator
 
-from .. import esign, work
+from .. import esign, hours, work
 from ..api import ApiError, Call, endpoint, not_found
 from ..common import bad, clean, code, features, patch_sql, reason_for_change
 from ..perms import _roles as perm_roles
@@ -430,6 +430,7 @@ class ScheduleFields(BaseModel):
                                  "maintenance_technician"]] | None = None
     certificate_required: bool | None = None
     notes: str | None = Field(default=None, max_length=2000)
+    hours_interval: decimal.Decimal | None = Field(default=None, gt=0, le=1000000)   # or after N run-hours / cycles
 
 
 class ScheduleIn(ScheduleFields):
@@ -544,14 +545,15 @@ def create_schedules(call: Call):
         s = call.tx.one(
             "INSERT INTO schedules (tenant_id, site_id, asset_id, kind, template_id, title, interval_value, interval_unit,"
             " basis, tol_before_value, tol_before_unit, tol_after_value, tol_after_unit, performer, vendor_id,"
-            " responsible_user_id, assignee_user_ids, assignee_roles, certificate_required, last_done, next_due, notes)"
+            " responsible_user_id, assignee_user_ids, assignee_roles, certificate_required, last_done, next_due, notes,"
+            " hours_interval)"
             " VALUES (%s, %s, %s, %s, %s::uuid, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s::uuid, %s::uuid, %s::uuid[], %s::text[],"
-            " %s, %s, %s, %s) RETURNING *",
+            " %s, %s, %s, %s, %s) RETURNING *",
             call.tenant_id, a["site_id"], a["id"], b.kind, b.template_id, clean(b.title), b.interval_value, b.interval_unit,
             data["basis"], b.tol_before_value, b.tol_before_unit, b.tol_after_value, b.tol_after_unit, data["performer"],
             b.vendor_id, b.responsible_user_id, b.assignee_user_ids or [], b.assignee_roles or [],
             bool(b.certificate_required if b.certificate_required is not None else data["performer"] == "external"),
-            b.last_done, first, clean(b.notes))
+            b.last_done, first, clean(b.notes), b.hours_interval)
         if b.kind == "calibration" and not a["calibration_required"]:
             call.tx.x("UPDATE assets SET calibration_required = true WHERE id = %s", a["id"])
         if b.kind == "pm" and not a["pm_required"]:
@@ -586,7 +588,10 @@ def update_schedule(call: Call):
         call.tx.x("UPDATE schedules SET assignee_roles = %s::text[] WHERE id = %s::uuid", data.pop("assignee_roles") or [], sid)
     patch_sql(call, "schedules", sid, {k: (clean(v) if k in ("title", "notes") else v) for k, v in data.items()
                                        if v is not None or k in ("title", "notes", "tol_before_value", "tol_before_unit",
-                                                                 "tol_after_value", "tol_after_unit")})
+                                                                 "tol_after_value", "tol_after_unit", "hours_interval")})
+    if "hours_interval" in data:
+        call.tx.x("UPDATE schedules SET hours_at_last = NULL WHERE id = %s::uuid AND hours_interval IS NULL", sid)
+        hours.check(call.tx, today(call), settings_of(call), str(s["asset_id"]))
     s = call.tx.one("SELECT * FROM schedules WHERE id = %s::uuid", sid)
     # carry the change into the open task that has not started yet
     t = call.tx.one("SELECT * FROM tasks WHERE schedule_id = %s AND status = 'open' ORDER BY due_date LIMIT 1", sid)
@@ -863,6 +868,18 @@ def task_detail(call: Call, tid: str) -> dict:
     t["perms"]["reschedule"] = open_ and not pending and can_request_reschedule(call, full)
     t["escalations"] = call.tx.q("SELECT level, trigger, due_date, created_at FROM escalations WHERE task_id = %s::uuid ORDER BY created_at", tid)
     t["deviation"] = call.tx.one("SELECT id, number, status FROM deviations WHERE task_id = %s::uuid ORDER BY created_at DESC LIMIT 1", tid)
+    if t["schedule"] and t["schedule"].get("hours_interval"):
+        tot = hours.run_totals(call.tx, [t["asset_id"]]).get(str(t["asset_id"]))
+        t["hours"] = hours.status(t["schedule"], tot, t0)
+    else:
+        t["hours"] = None
+    if t["kind"] == "pm" and open_:
+        from .. import gaps
+        est = call.tx.val("SELECT est_minutes FROM templates WHERE id = %s", t["template_id"]) if t["template_id"] else None
+        tz = call.tx.val("SELECT timezone FROM tenants WHERE id = %s", call.tenant_id) or "UTC"
+        t["production"] = gaps.pm_slot(call.tx, {**full, "est_minutes": est}, t0, tz)
+    else:
+        t["production"] = None
     return t
 
 
@@ -1124,6 +1141,7 @@ def complete_task(call: Call):
         if s and s["active"]:
             due = work.next_due(s, t["performed_date"], s["next_due"] or t["due_date"])
             call.tx.x("UPDATE schedules SET last_done = %s, next_due = %s WHERE id = %s", t["performed_date"], due, s["id"])
+            hours.on_completed(call.tx, s["id"])
             nxt = create_task(call, s, due)
     impact = None
     if cal and work.is_oot(v):

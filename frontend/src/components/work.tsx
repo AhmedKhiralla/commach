@@ -34,7 +34,7 @@ export interface Schedule {
   tol_before_value: number | null; tol_before_unit: TolUnit | null; tol_after_value: number | null; tol_after_unit: TolUnit | null;
   performer: "internal" | "external"; vendor_id: string | null; responsible_user_id: string | null;
   assignee_user_ids: string[]; assignee_roles: string[]; certificate_required: boolean; last_done: string | null;
-  next_due: string | null; active: boolean; notes: string | null; template_code: string | null; template_version: number | null;
+  next_due: string | null; active: boolean; notes: string | null; hours_interval?: number | null; template_code: string | null; template_version: number | null;
   template_title: string | null; template_status: string | null; vendor_name: string | null; responsible_name: string | null;
   assignee_names: string[]; rule?: Rule;
 }
@@ -188,6 +188,7 @@ export function SchedulePlanner({ assets, schedule, onClose, onDone, kind = "cal
   const [lastDone, setLastDone] = useState("");
   const [stagger, setStagger] = useState("0");
   const [notes, setNotes] = useState(schedule?.notes ?? "");
+  const [hoursIv, setHoursIv] = useState(schedule?.hours_interval != null ? String(Number(schedule.hours_interval)) : "");
   const [reason, setReason] = useState("");
   const [preview, setPreview] = useState<{ dates: { due: string; window_start: string | null; window_end: string; moved_from?: string | null }[]; rule: Rule } | null>(null);
   const [busy, setBusy] = useState(false);
@@ -227,6 +228,7 @@ export function SchedulePlanner({ assets, schedule, onClose, onDone, kind = "cal
       template_id: templateId || null, interval_value: iv, interval_unit: iunit, basis, ...tol, performer,
       vendor_id: performer === "external" ? vendorId || null : null, responsible_user_id: responsible || null,
       assignee_roles: roles, assignee_user_ids: users, certificate_required: certRequired, notes: notes || null,
+      hours_interval: hoursIv.trim() ? Number(hoursIv.replace(",", ".")) : null,
     };
     try {
       if (schedule) {
@@ -350,6 +352,8 @@ export function SchedulePlanner({ assets, schedule, onClose, onDone, kind = "cal
             {!editing && <TextField label={t("sch.lastDone")} type="date" value={lastDone} onChange={setLastDone} disabled={!!firstDue} />}
           </div>
           {!editing && assets.length > 1 && <TextField label={t("sch.stagger")} type="number" min={0} max={60} value={stagger} onChange={setStagger} />}
+          <TextField label={t("rh.interval")} hint={t("rh.intervalHint")} value={hoursIv} onChange={setHoursIv} inputMode="decimal" dir="ltr"
+            error={errs.hours_interval} />
           <Field2 label={t("af.notes")}><textarea className="textarea" aria-label={t("af.notes")} value={notes} onChange={(e) => setNotes(e.target.value)} maxLength={2000} /></Field2>
           {editing && <TextField label={t("sign.reason")} hint={t("sch.reasonHint")} value={reason} onChange={setReason} maxLength={500} error={errs.reason} />}
         </div>

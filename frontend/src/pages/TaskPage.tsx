@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   LuArrowLeft, LuCalendarClock, LuCheck, LuCircleCheck, LuCircleX, LuFileText, LuHandshake, LuPlus, LuSave, LuSignature, LuSparkles,
   LuTrash2, LuTruck, LuUpload, LuX,
+  LuClock, LuFactory,
 } from "react-icons/lu";
 import { StatusBadge } from "../components/cm";
 import { PrintFormButton } from "../components/forms";
@@ -52,6 +53,11 @@ interface Task extends TaskRow {
     supervisor_name: string | null; qa_name: string | null }[];
   escalations: { level: number; trigger: string; due_date: string; created_at: string }[];
   deviation: { id: string; number: string; status: string } | null;
+  due_by_hours?: boolean;
+  hours: { hours_interval: number; used: number | null; remaining: number | null; projected_date: string | null; due: boolean } | null;
+  production: { campaigns: { starts_at: string; ends_at: string; label: string | null; ref: string | null }[]; conflict: boolean;
+    need_minutes: number; from: string; to: string;
+    suggestion: { start: string; end: string; date: string; hours_free: number } | null } | null;
   needs_acceptance: boolean; next_task?: { id: string; number: string; due_date: string } | null;
   impact_created?: { id: string; number: string } | null;
 }
@@ -128,7 +134,7 @@ function SigLine({ sig, label }: { sig: Sig; label: string }) {
 }
 
 export function TaskPage({ taskId }: { taskId: string }) {
-  const { t, tx, lang, qty } = useI18n();
+  const { t, tx, lang, qty, dateTime } = useI18n();
   const { me } = useSession();
   const toast = useToast();
   const day = useDay();
@@ -147,7 +153,7 @@ export function TaskPage({ taskId }: { taskId: string }) {
   const [ai, setAi] = useState<CertOut | null>(null);
   const [aiApplied, setAiApplied] = useState<string | null>(null);
   const [preview, setPreview] = useState<string | null>(null);
-  const [dialog, setDialog] = useState<null | "complete" | "send" | "review" | "cancel" | "reschedule">(null);
+  const [dialog, setDialog] = useState<null | "complete" | "send" | "review" | "cancel" | "reschedule" | "reschedule-pp">(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
   const load = (x: Task) => {
@@ -335,6 +341,27 @@ export function TaskPage({ taskId }: { taskId: string }) {
       {x.deviation && <Notice tone={x.deviation.status === "open" ? "danger" : "ok"}><Link to={`/deviations/${x.deviation.id}`}>{x.deviation.number}</Link> · {t(`dev.status.${x.deviation.status}` as StringKey)}</Notice>}
       {!closed && x.escalations.length > 0 && <div className="chip-row cm-esc">{x.escalations.map((e, i) => (
         <Badge key={i} tone={e.level >= 2 ? "danger" : "warn"}>{t("nt.level", { n: e.level })} · {t(`esc.${e.trigger}` as StringKey)} · {day(e.created_at.slice(0, 10))}</Badge>))}</div>}
+      {x.hours && !closed && <p className="small muted"><LuClock aria-hidden /> {t("rh.taskLine", { used: Math.round(Number(x.hours.used ?? 0)).toLocaleString(),
+        interval: Math.round(Number(x.hours.hours_interval)).toLocaleString() })}{x.due_by_hours && <> · <Badge tone="warn">{t("rh.dueByHours")}</Badge></>}
+        {x.hours.projected_date && !x.hours.due && <> · {t("rh.projected", { date: day(x.hours.projected_date) })}</>}</p>}
+      {x.production && !closed && (
+        <section className="panel cm-sec cm-pp">
+          <div className="panel-head"><h3><LuFactory aria-hidden /> {t("pp.title")}</h3><span className="spacer" />
+            {x.production.suggestion && x.perms.reschedule && x.production.suggestion.date !== x.due_date &&
+              <Button size="sm" onClick={() => setDialog("reschedule-pp")}>{t("pp.request")}</Button>}</div>
+          <p className="small muted">{t("pp.lead", { from: day(x.production.from), to: day(x.production.to) })}</p>
+          {x.production.conflict && <Notice tone="warn">{t("pp.conflict")}</Notice>}
+          <p className="small">{x.production.suggestion
+            ? t("pp.suggest", { start: dateTime(x.production.suggestion.start), end: dateTime(x.production.suggestion.end), h: x.production.suggestion.hours_free })
+            : t("pp.noSlot", { h: Math.round(x.production.need_minutes / 60) })}</p>
+          <ul className="cm-pp-list">
+            {x.production.campaigns.map((c, i) => (
+              <li key={i}><span className="small nowrap">{dateTime(c.starts_at)} – {dateTime(c.ends_at)}</span>
+                <span className="small">{c.label ?? ""}</span>{c.ref && <span className="small subtle mono-id">{c.ref}</span>}</li>
+            ))}
+          </ul>
+        </section>
+      )}
       {x.next_task && <Notice tone="ok">{t(isPm ? "pmt.nextCreated" : "task.nextCreated", { date: day(x.next_task.due_date), number: x.next_task.number })}</Notice>}
 
       <div className="cm-task-grid">
@@ -555,6 +582,9 @@ export function TaskPage({ taskId }: { taskId: string }) {
         </SignDialog>
       )}
       {dialog === "reschedule" && <RescheduleSheet task={x} onClose={() => setDialog(null)} onDone={reload} />}
+      {dialog === "reschedule-pp" && x.production?.suggestion && <RescheduleSheet task={x} onClose={() => setDialog(null)} onDone={reload}
+        initialDate={x.production.suggestion.date} initialReason={t("pp.suggest", { start: dateTime(x.production.suggestion.start),
+          end: dateTime(x.production.suggestion.end), h: x.production.suggestion.hours_free })} />}
       {dialog === "send" && (
         <SignDialog title={`${t("task.send")} · ${x.number}`} lead={x.vendor_name ?? undefined} meaning="sent_to_vendor" onClose={() => setDialog(null)}
           onSign={async (v) => { setData(await post<Task>(`/api/tasks/${x.id}/send`, { ...v, reason: v.reason || null })); toast(t("task.sentToast")); }} />

@@ -119,9 +119,25 @@ address (`commach.comp11labs.com`) and its own database, with an API that connec
   - **Print** buttons on calibration and PM tasks, the annual plans, and each asset (history card, status label).
   - The demo company has the six standard forms approved and in use (QA027-00/F01, F02, L01, EN002-01/F01, F02, EN003-F02).
 
+- **Phase 6 – Analysis, assistant and Complanning**
+  - **Results analysis** for calibration and maintenance: completed, on-time, out-of-tolerance (or findings) and
+    first-time pass rates, overdue now, a month-by-month chart, results by asset class and vendor performance
+    (on time, OOT, turnaround, days to close the record, missing certificates).
+  - **Drift charts** on each instrument's calibration tab: as-found history per point inside its tolerance band, the
+    drift line since the last adjustment and the projected date it crosses a limit.
+  - **Interval recommendations**: shorten after an out-of-tolerance result or when drift reaches a limit before the
+    next due date; extend after three passes with at most half the tolerance used. Applied with a reason like any
+    schedule change.
+  - **Run-hours triggers**: meter readings per machine (entered, or sent by Complanning); a schedule can also fall
+    due after N run-hours or cycles, whichever comes first. The open task is brought forward automatically.
+  - **Complanning connection**: planned calibration and PM windows and unplanned downtime go out as events; the
+    released production plan comes in, and each PM shows the free slot between campaigns nearest its due date.
+  - **Ask ComMach**: questions in English or Arabic, answered by the AI only from read-only look-ups ComMach runs
+    with the user's own access; answers link to the records, and every question is logged.
+
 The web app is English and Arabic (right-to-left), with light, dark and system themes, and works on phones and tablets.
 
-See [docs/ROADMAP.md](docs/ROADMAP.md) for the next phases (analysis, the assistant and Complanning come next),
+See [docs/ROADMAP.md](docs/ROADMAP.md) for the next phases (all six phases are released),
 [docs/PART11.md](docs/PART11.md) for the 21 CFR Part 11 traceability and [docs/INTEGRATION.md](docs/INTEGRATION.md)
 for connecting Complanning.
 

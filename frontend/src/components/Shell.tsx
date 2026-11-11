@@ -1,6 +1,6 @@
 import { useEffect, useState, type ReactNode } from "react";
 import {
-  LuBoxes, LuBuilding2, LuCalendarRange, LuClipboardList, LuChartLine, LuChevronDown, LuClipboardCheck, LuFileSpreadsheet, LuFileText,
+  LuBoxes, LuBuilding2, LuCalendarRange, LuClipboardList, LuChartLine, LuSparkles, LuChevronDown, LuClipboardCheck, LuFileSpreadsheet, LuFileText,
   LuHouse, LuKeyRound, LuListTodo, LuOctagonAlert, LuLanguages, LuListChecks, LuLogOut, LuMapPin, LuMenu, LuMonitor, LuMoon, LuNetwork, LuScrollText,
   LuSearch, LuSettings, LuShieldAlert, LuSun, LuTags, LuTruck, LuUsers, LuWrench, LuX,
 } from "react-icons/lu";
@@ -31,6 +31,8 @@ function groupsFor(isPlatform: boolean, isAdmin: boolean, canAudit: boolean): Na
       { to: "/", label: "nav.home", icon: <LuHouse /> },
       { to: "/todo", label: "nav.myTasks", icon: <LuListTodo /> },
       { to: "/deviations", label: "nav.deviations", icon: <LuOctagonAlert /> },
+      { to: "/analysis", label: "nav.analysis", icon: <LuChartLine /> },
+      { to: "/ask", label: "nav.ask", icon: <LuSparkles /> },
     ] },
     { title: "nav.register", items: [
       { to: "/assets", label: "nav.assets", icon: <LuBoxes /> },
@@ -53,9 +55,6 @@ function groupsFor(isPlatform: boolean, isAdmin: boolean, canAudit: boolean): Na
       { to: "/vendors", label: "nav.vendors", icon: <LuTruck /> },
       { to: "/departments", label: "nav.departments", icon: <LuNetwork /> },
       { to: "/forms", label: "nav.forms", icon: <LuFileText /> },
-    ] },
-    { title: "nav.coming", items: [
-      { label: "nav.analysis", icon: <LuChartLine />, phase: 6 },
     ] },
   ];
   if (isAdmin) {

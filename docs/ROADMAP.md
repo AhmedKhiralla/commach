@@ -9,7 +9,7 @@ The certificate AI was moved forward into Phase 2, so the Al-Andalous Medical Co
 | 3 | **Preventive maintenance** and annual plan approval (see below) | Released |
 | 4 | **Tasks and notifications** (see below) | Released |
 | 5 | **Forms and records** (see below) | Released |
-| 6 | **Analysis, assistant and Complanning** (see below) | Next |
+| 6 | **Analysis, assistant and Complanning** (see below) | Released |
 
 ## Phase 2 – Calibration
 
@@ -96,3 +96,11 @@ not in this version; their layouts can already be drafted on the history card an
   - interval recommendations
 - **"Ask ComMach" assistant** (as in Complanning 0.9). It answers from the register and records with each user's own access.
 - **Complanning connection.** Planned calibration and PM windows and breakdowns become machine downtime, and PM is suggested in gaps between campaigns.
+- **Run-hours triggers.** PM (or calibration) due after N run-hours or cycles, or at its date, whichever comes first.
+
+Released in Phase 6 as described, plus: drift charts on every instrument, vendor turnaround and record-closing times,
+inbound run-hours from Complanning, the free-slot suggestion on each PM task with a one-click reschedule request, and
+a log of every assistant question with the look-ups it made. The assistant reads; it never changes a record.
+
+Possible next steps: breakdown work orders (EN003 breakdown note), building checklists (EN004), single sign-on across
+Comp11 Labs products, and spare-parts stock.

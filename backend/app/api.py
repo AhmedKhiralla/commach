@@ -180,7 +180,10 @@ def _read_json(request: Request) -> Any:
 
 def _handle(fn, request: Request, auth, body_model, allow_password_change):
     try:
-        if request.method in ("POST", "PUT", "PATCH", "DELETE") and \
+        # connected apps authenticate with a bearer key, not a cookie, so they cannot be forged by a browser
+        bearer = request.url.path.startswith("/api/integration/v1/") and \
+            (request.headers.get("authorization") or "").lower().startswith("bearer ")
+        if request.method in ("POST", "PUT", "PATCH", "DELETE") and not bearer and \
                 request.headers.get(CSRF_HEADER) != CSRF_VALUE:
             raise ApiError(403, "csrf", "Request rejected: missing application header.")
         payload = None

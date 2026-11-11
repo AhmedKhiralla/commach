@@ -413,7 +413,10 @@ def run_tenant(tenant_id: str, now: dt.datetime | None = None) -> dict:
         local = tx.val("SELECT (%s::timestamptz AT TIME ZONE %s)", now or dt.datetime.now(dt.timezone.utc), tz)
         st = work.effective_settings(tx.val("SELECT work_settings FROM tenants WHERE id = %s", tenant_id))
         features = effective_features(tx.val("SELECT features FROM tenants WHERE id = %s", tenant_id))
+        from . import hours
+        moved = hours.check(tx, local.date(), st)
         out = escalate(tx, tenant_id, local.date(), st, features)
+        out["hours_due"] = moved
         out["digests"] = digest(tx, tenant_id, local.date(), local.hour, st)
     with db.transaction(ctx) as tx:
         out.update(send_outbox(tx))

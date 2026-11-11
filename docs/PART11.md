@@ -86,6 +86,21 @@ Evidence: `tests/test_notify.py`.
 
 Evidence: `tests/test_forms.py`.
 
+### Analysis, run-hours, Complanning data and the assistant (Phase 6)
+
+- Analysis and interval recommendations are read-only views of signed records. A recommended interval is applied
+  only through the normal schedule change, with a reason, into the audit trail.
+- Meter readings are append-only and can only go up; a replaced meter is recorded as a reset with its reason. A task
+  brought forward by run-hours records why (`due_by_hours`); its window and due date change only while it is open.
+- Data from Complanning (production plan, run-hours) arrives with the company's integration key; each plan import is
+  audited (`IMPORT`). It informs planning and never changes a GMP record by itself — moving a PM date still needs an
+  approved reschedule.
+- Ask ComMach cannot change data: the AI chooses from a fixed list of read-only look-ups, which run inside the user's
+  own transaction (row-level security and the user's sites). Each question, the look-ups made, the model and the answer
+  are stored append-only in `assistant_questions`. Answers carry a reminder to check the linked records.
+
+Evidence: `tests/test_analysis.py`.
+
 ## Subpart C — Electronic signatures
 
 | Clause | Requirement | How ComMach meets it | Evidence |

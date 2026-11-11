@@ -163,6 +163,16 @@ class FakeAI:
                                    "spare_parts": []},
                                   {"title": "Empty", "interval_value": 1, "interval_unit": "week", "items": []}],
                        "notes": "Hours-based intervals converted."}
+        elif "You are Ask ComMach" in text:
+            import re as _re
+            if "LOOKUP RESULTS" not in text:
+                content = {"lookups": [{"tool": "tasks", "args": {"kind": "calibration", "state": "completed", "limit": 5}},
+                                       {"tool": "kpis", "args": {"kind": "calibration", "months": 12}},
+                                       {"tool": "nope", "args": {}}]}
+            else:
+                nums = _re.findall(r"CAL-\d{4}-\d{4}", text)
+                content = {"answer": f"The last calibration was **{nums[0] if nums else 'none'}**.",
+                           "refs": [{"type": "task", "code": nums[0] if nums else ""}, {"type": "asset", "code": "THG-110"}]}
         elif "impact assessment" in text:
             content = {"summary": "The balance was found out of tolerance at 100 g.", "scope": "QC balance room R-203.",
                        "products": "Review assay results weighed on the balance during the period.", "risk": "medium",

@@ -14,6 +14,7 @@ from starlette.routing import Route
 
 from .config import settings
 from .routers import forms as forms_r
+from .routers import analysis, assistant
 from .routers import (ai_routes, assets, audit_trail, auth, company, excel, files, hierarchy, integration, labels, lists, todo,
                       platform, sample, work)
 
@@ -174,6 +175,16 @@ API_ROUTES = [
     Route("/api/integration/keys/{key_id}/revoke", integration.revoke_key, methods=["POST"]),
     Route("/api/integration/v1/assets", integration.api_assets, methods=["GET"]),
     Route("/api/integration/v1/events", integration.api_events, methods=["GET"]),
+    Route("/api/integration/v1/production-plan", integration.api_production_plan, methods=["POST"]),
+    Route("/api/integration/v1/meter-readings", integration.api_meter_readings, methods=["POST"]),
+    Route("/api/analysis/summary", analysis.summary, methods=["GET"]),
+    Route("/api/analysis/drift", analysis.drift, methods=["GET"]),
+    Route("/api/analysis/intervals", analysis.intervals, methods=["GET"]),
+    Route("/api/analysis/pm-gaps", analysis.pm_gaps, methods=["GET"]),
+    Route("/api/assets/{asset_id}/meter", analysis.get_meter, methods=["GET"]),
+    Route("/api/assets/{asset_id}/meter", analysis.add_meter, methods=["POST"]),
+    Route("/api/assistant/ask", assistant.ask, methods=["POST"]),
+    Route("/api/assistant/history", assistant.history, methods=["GET"]),
     # Audit trail
     Route("/api/audit", audit_trail.list_audit, methods=["GET"]),
     Route("/api/audit/facets", audit_trail.audit_facets, methods=["GET"]),

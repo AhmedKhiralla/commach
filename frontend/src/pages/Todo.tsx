@@ -289,14 +289,15 @@ export function TodoPage() {
 }
 
 // ------------------------------------------------------------------ reschedule from the task page
-export function RescheduleSheet({ task, onClose, onDone }: {
+export function RescheduleSheet({ task, onClose, onDone, initialDate, initialReason }: {
   task: { id: string; number: string; due_date: string; window_start: string | null; window_end: string }; onClose: () => void; onDone: () => void;
+  initialDate?: string; initialReason?: string;
 }) {
   const { t } = useI18n();
   const day = useDay();
   const toast = useToast();
-  const [due, setDue] = useState("");
-  const [reason, setReason] = useState("");
+  const [due, setDue] = useState(initialDate ?? "");
+  const [reason, setReason] = useState(initialReason ?? "");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const window = task.window_start ? t("cw.windowRange", { start: day(task.window_start), end: day(task.window_end) }) : t("cw.windowAny", { end: day(task.window_end) });

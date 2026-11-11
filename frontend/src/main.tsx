@@ -1,4 +1,6 @@
 import { FormPage, FormsPage } from "./pages/Forms";
+import { AnalysisPage } from "./pages/Analysis";
+import { AskPage } from "./pages/Ask";
 import { StrictMode, type ReactElement } from "react";
 import { createRoot } from "react-dom/client";
 import { LuCompass, LuShieldCheck } from "react-icons/lu";
@@ -72,6 +74,8 @@ function Routes() {
     case "/maintenance/templates": return gate(tenantUser, <Templates key="pm" kind="pm" />);
     case "/calibration/impacts": return gate(tenantUser, <Impacts />);
     case "/forms": return gate(tenantUser, <FormsPage />);
+    case "/analysis": return gate(tenantUser, <AnalysisPage />);
+    case "/ask": return gate(tenantUser, <AskPage />);
     case "/import": return gate(tenantUser, <ImportPage />);
     case "/locations": return gate(tenantUser, <Locations />);
     case "/classes": return gate(tenantUser, <Classes />);
